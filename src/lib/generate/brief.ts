@@ -14,9 +14,15 @@ import {
 import {
   CREATIVE_DIRECTIONS,
   CREATIVE_DIRECTION_KEYS,
+  isPhotoSafe,
+  PHOTO_SAFE_DIRECTIONS,
   type CreativeDirectionKey,
 } from "./directions";
-import { assignImageModels } from "./models";
+import {
+  assignImageModels,
+  imageModelById,
+  type ImageModelId,
+} from "./models";
 
 export type { AdBrief, PlannedConcept } from "../ad-run";
 
@@ -118,6 +124,73 @@ function fallbackCopy(name: string, description: string): Omit<CopyPick, "key"> 
       AD_RUN_LIMITS.subheadline,
     ),
   };
+}
+
+/**
+ * Spend the models that accept a reference on the Products that have a photo.
+ *
+ * Only two of the three Product-slot models take an image, and a Product may
+ * have no photograph — left to chance the capability lands on a Product with
+ * nothing to send while one with a real shot gets a text-only model. Returns
+ * one model per Product, in Product order.
+ */
+function pairModelsToPhotos(
+  slotModels: readonly ImageModelId[],
+  products: readonly Product[],
+): ImageModelId[] {
+  const capable = slotModels.filter((id) => imageModelById(id)?.acceptsImage);
+  const rest = slotModels.filter((id) => !imageModelById(id)?.acceptsImage);
+  return products.map((product) =>
+    (product.imageUrl && capable.length ? capable : rest).shift() ??
+    capable.shift() ??
+    rest.shift()!,
+  );
+}
+
+/**
+ * Move a photo-backed Product onto a direction that can show it.
+ *
+ * Directions are swapped rather than reassigned so every slot keeps a distinct
+ * one for free. The donor is a slot that does not need a photo-safe direction —
+ * a company ad, or a Product with no photograph — which loses nothing by taking
+ * the abstract treatment instead. The copy was written for its original
+ * direction and travels with the slot, so tone can drift slightly; a wrong
+ * subject is the worse of the two.
+ */
+function preferPhotoSafeDirections(
+  planned: readonly PlannedConcept[],
+): PlannedConcept[] {
+  const result = planned.map((concept) => ({ ...concept }));
+  const used = new Set<CreativeDirectionKey>(result.map(({ key }) => key));
+  const needsPhotoSafe = (concept: PlannedConcept) =>
+    concept.subject.kind === "product" &&
+    concept.subject.imageUrl !== null &&
+    imageModelById(concept.model)?.acceptsImage === true;
+
+  for (const concept of result) {
+    if (!needsPhotoSafe(concept) || isPhotoSafe(concept.key)) continue;
+
+    // Prefer a swap: another slot already holds a photo-safe direction and does
+    // not need one, so trading keeps every direction in the run distinct.
+    const donor = result.find(
+      (other) =>
+        other !== concept && isPhotoSafe(other.key) && !needsPhotoSafe(other),
+    );
+    if (donor) {
+      [concept.key, donor.key] = [donor.key, concept.key];
+      continue;
+    }
+
+    // No donor because the run never drew a photo-safe direction at all. Take
+    // an unused one outright — distinctness holds, and the direction this slot
+    // gives up simply leaves the run.
+    const spare = [...PHOTO_SAFE_DIRECTIONS].find((key) => !used.has(key));
+    if (!spare) continue; // Both are already in use by slots that need them.
+    used.delete(concept.key);
+    used.add(spare);
+    concept.key = spare;
+  }
+  return result;
 }
 
 /**
@@ -243,7 +316,11 @@ export async function pickConceptsAndCraftCopy(
   });
 
   const models = assignImageModels();
-  const planned: PlannedConcept[] = [
+  const productModels = pairModelsToPhotos(
+    models.slice(AD_COMPANY_CONCEPT_COUNT),
+    products,
+  );
+  const planned: PlannedConcept[] = preferPhotoSafeDirections([
     ...companyPicks.map((pick, index) => ({
       ...pick,
       model: models[index],
@@ -254,11 +331,11 @@ export async function pickConceptsAndCraftCopy(
       const product = products[index];
       return {
         ...pick,
-        model: models[AD_COMPANY_CONCEPT_COUNT + index],
+        model: productModels[index],
         subject: { kind: "product" as const, ...product },
       };
     }),
-  ];
+  ]);
 
   const expected = AD_COMPANY_CONCEPT_COUNT + products.length;
   if (planned.length !== expected) {

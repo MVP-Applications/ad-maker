@@ -126,6 +126,7 @@ describe("Ad Renderer", () => {
           kind: "product",
           name: "Stripe Billing",
           description: "Subscription billing and recurring revenue tools.",
+          imageUrl: null,
         },
       }),
     );
@@ -136,6 +137,134 @@ describe("Ad Renderer", () => {
       "Subscription billing and recurring revenue tools.",
     );
     expect(prompt).toContain("not a generic company-level metaphor");
+  });
+
+  describe("the one reference image", () => {
+    const product = (imageUrl: string | null) => ({
+      kind: "product" as const,
+      name: "NuPhy Gem80",
+      description: "TKL custom mechanical keyboard.",
+      imageUrl,
+    });
+
+    it("spends it on the product's own photo when the ad is about a product", async () => {
+      const deps = dependencies();
+      await createAdRenderer(deps).render(
+        query({
+          model: "openai/gpt-image-2",
+          subject: product("https://cdn.example/gem80.png"),
+        }),
+      );
+
+      expect(deps.loadRaster).toHaveBeenCalledWith(
+        "https://cdn.example/gem80.png",
+        undefined,
+      );
+      const call = vi.mocked(deps.generateImage).mock.calls[0][0];
+      expect(call.logo).toBe(LOGO);
+      expect(call.prompt).toContain("The attached image is the REAL NuPhy Gem80.");
+      // The logo would be the wrong reference here — the ad's whole subject is
+      // the product, and only one image is sent.
+      expect(call.prompt).not.toContain("REAL logo mark");
+    });
+
+    it("pays for high quality only where a real article has to survive", async () => {
+      // At medium the WH80's transparent keycaps came back solid while its case,
+      // light bar and layout were right — refraction degrades first.
+      const withPhoto = dependencies();
+      await createAdRenderer(withPhoto).render(
+        query({
+          model: "openai/gpt-image-2",
+          subject: product("https://cdn.example/gem80.png"),
+        }),
+      );
+      expect(vi.mocked(withPhoto.generateImage).mock.calls[0][0].quality).toBe("high");
+
+      // A Product with no photo has no materials to reproduce, and a company ad
+      // carries no article at all — neither is worth the higher bill.
+      for (const subject of [product(null), { kind: "company" as const }]) {
+        const deps = dependencies();
+        await createAdRenderer(deps).render(
+          query({ model: "openai/gpt-image-2", subject }),
+        );
+        expect(vi.mocked(deps.generateImage).mock.calls[0][0].quality).toBe("medium");
+      }
+    });
+
+    it("scopes the brand palette to the scene so the product keeps its colours", async () => {
+      // A white keyboard came back tinted brand-teal because the direction says
+      // "render entirely in tones of colorA" and the reference says "match its
+      // colourway". The override is last, where it wins.
+      const deps = dependencies();
+      await createAdRenderer(deps).render(
+        query({
+          model: "openai/gpt-image-2",
+          subject: product("https://cdn.example/gem80.png"),
+        }),
+      );
+
+      const prompt = vi.mocked(deps.generateImage).mock.calls[0][0].prompt;
+      expect(prompt).toContain("COLOUR OVERRIDE");
+      expect(prompt).toContain("BACKGROUND, the lighting, and the TYPOGRAPHY only");
+      expect(prompt).toContain("keeps its own real colours");
+      expect(prompt.indexOf("COLOUR OVERRIDE")).toBeGreaterThan(
+        prompt.indexOf("HARD RULES"),
+      );
+    });
+
+    it("falls back to the logo when the product has no photo", async () => {
+      const deps = dependencies();
+      await createAdRenderer(deps).render(
+        query({ model: "openai/gpt-image-2", subject: product(null) }),
+      );
+
+      expect(deps.loadRaster).toHaveBeenCalledWith(
+        "https://cdn.example/stripe.png",
+        undefined,
+      );
+      expect(vi.mocked(deps.generateImage).mock.calls[0][0].prompt).toContain(
+        "REAL logo mark",
+      );
+    });
+
+    it("still spends it on the logo for a company ad", async () => {
+      const deps = dependencies();
+      await createAdRenderer(deps).render(query({ model: "openai/gpt-image-2" }));
+
+      expect(vi.mocked(deps.generateImage).mock.calls[0][0].prompt).toContain(
+        "REAL logo mark",
+      );
+    });
+
+    it("sends nothing to a model that takes text only", async () => {
+      // The third Product slot: fal has no edit endpoint for Imagen, so its ad
+      // is drawn from the description alone.
+      const deps = dependencies();
+      await createAdRenderer(deps).render(
+        query({
+          model: "fal/fal-ai/imagen4/preview/ultra",
+          subject: product("https://cdn.example/gem80.png"),
+        }),
+      );
+
+      expect(deps.loadRaster).not.toHaveBeenCalled();
+      const call = vi.mocked(deps.generateImage).mock.calls[0][0];
+      expect(call.logo).toBeNull();
+      expect(call.prompt).not.toContain("The attached image");
+    });
+
+    it("keeps the ad when the product photo cannot be loaded", async () => {
+      const deps = dependencies({ loadRaster: vi.fn(async () => null) });
+      const result = await createAdRenderer(deps).render(
+        query({
+          model: "openai/gpt-image-2",
+          subject: product("https://cdn.example/gone.png"),
+        }),
+      );
+
+      expect(result.ok).toBe(true);
+      expect(vi.mocked(deps.generateImage).mock.calls[0][0].logo).toBeNull();
+    });
   });
 
   it("uses the verified styleguide Google Font and preserves the generic fallback", async () => {

@@ -53,6 +53,12 @@ export type AdBrief = {
 export type Product = {
   name: string;
   description: string;
+  /**
+   * The product's own photograph, when its site publishes one. Handed to the
+   * Image Models that accept a reference so a Product ad shows the real thing
+   * instead of a plausible invention; null everywhere else, and never required.
+   */
+  imageUrl: string | null;
 };
 
 export type ConceptSubject =
@@ -250,7 +256,7 @@ function decodeSubject(value: unknown, name = "concept.subject"): ConceptSubject
   }
   if (kind !== "product") invalid(`${name}.kind is unknown`);
 
-  onlyKeys(subject, ["kind", "name", "description"], name);
+  onlyKeys(subject, ["kind", "name", "description", "imageUrl"], name);
   return {
     kind,
     name: text(subject.name, `${name}.name`, {
@@ -263,6 +269,10 @@ function decodeSubject(value: unknown, name = "concept.subject"): ConceptSubject
       max: AD_RUN_LIMITS.productDescription,
       trim: true,
     }),
+    imageUrl:
+      subject.imageUrl === null || subject.imageUrl === undefined
+        ? null
+        : publicHttpUrl(subject.imageUrl, `${name}.imageUrl`),
   };
 }
 
@@ -364,6 +374,7 @@ const RENDERED_AD_QUERY_KEYS = [
   "subject",
   "product",
   "productDescription",
+  "productImage",
   "headline",
   "sub",
   "name",
@@ -386,6 +397,9 @@ function encodeRenderedAdQuery(query: Omit<RenderedAdQuery, "canonicalHref">): s
   if (query.subject.kind === "product") {
     params.set("product", query.subject.name);
     params.set("productDescription", query.subject.description);
+    // Absent rather than empty when the site publishes no photo, so the
+    // canonical URL — and therefore the CDN key — stays stable.
+    if (query.subject.imageUrl) params.set("productImage", query.subject.imageUrl);
   }
   params.set("headline", query.headline);
   params.set("sub", query.subheadline);
@@ -450,7 +464,11 @@ function requiredParameter(params: URLSearchParams, name: string): string {
 function decodeQuerySubject(params: URLSearchParams): ConceptSubject {
   const kind = requiredParameter(params, "subject");
   if (kind === "company") {
-    if (params.has("product") || params.has("productDescription")) {
+    if (
+      params.has("product") ||
+      params.has("productDescription") ||
+      params.has("productImage")
+    ) {
       invalid("Company subjects cannot contain Product parameters");
     }
     return decodeSubject({ kind }, "subject");
@@ -461,6 +479,7 @@ function decodeQuerySubject(params: URLSearchParams): ConceptSubject {
       kind,
       name: requiredParameter(params, "product"),
       description: requiredParameter(params, "productDescription"),
+      imageUrl: params.get("productImage"),
     },
     "subject",
   );

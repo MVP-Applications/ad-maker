@@ -72,3 +72,23 @@ export const CREATIVE_DIRECTION_KEYS = CREATIVE_DIRECTIONS.map(
 export function directionByKey(key: string): CreativeDirection | undefined {
   return CREATIVE_DIRECTIONS.find((direction) => direction.key === key);
 }
+
+/**
+ * Directions that can show a supplied product photograph as itself.
+ *
+ * The other ten deliberately re-invent their subject — an abstract single-hue
+ * crop, a line schematic, a neon grid, a chart. Handing one of those a real
+ * photograph asks for two incompatible things and yields neither: the NuPhy
+ * WH80 came back through `monochrome_crop` recoloured, its faceted edge
+ * flattened, and its key legends invented. A Product ad that has a photo is
+ * therefore steered here, where the reference is an asset rather than a
+ * contradiction.
+ */
+export const PHOTO_SAFE_DIRECTIONS = new Set<CreativeDirectionKey>([
+  "product_hero",
+  "editorial_spread",
+]);
+
+export function isPhotoSafe(key: CreativeDirectionKey): boolean {
+  return PHOTO_SAFE_DIRECTIONS.has(key);
+}

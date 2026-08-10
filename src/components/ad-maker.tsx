@@ -332,6 +332,8 @@ function AdCard({
   const directionLabel = directionByKey(c.key)?.label ?? c.key;
   const modelName = imageModelById(c.model)?.displayName ?? c.model;
   const productName = c.subject.kind === "product" ? c.subject.name : null;
+  const sourceImage = c.subject.kind === "product" ? c.subject.imageUrl : null;
+  const usedAsReference = sourceImage !== null && imageModelById(c.model)?.acceptsImage === true;
   const cardTitle = productName ?? directionLabel;
   const subjectLabel = productName ? `Product · ${directionLabel}` : "Company";
   const imageAlt = productName
@@ -401,6 +403,36 @@ function AdCard({
           </div>
         )}
       </div>
+
+      {/* The shop's own photograph of this product. Shown so the ad above can be
+          judged against the real article instead of taken on trust — and it says
+          whether this model was actually given it, since only some accept one. */}
+      {sourceImage ? (
+        <div className="flex items-start gap-2.5 border-t border-border px-3 py-2.5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={sourceImage}
+            alt={`${productName} as photographed on the brand's own site`}
+            className="size-10 shrink-0 rounded-md border border-border bg-white object-contain"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {usedAsReference
+                ? "Real product · sent as reference"
+                : "Real product · not sent (model takes text only)"}
+            </p>
+            <a
+              href={sourceImage}
+              target="_blank"
+              rel="noreferrer noopener"
+              title={sourceImage}
+              className="block truncate font-mono text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+            >
+              {sourceImage}
+            </a>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

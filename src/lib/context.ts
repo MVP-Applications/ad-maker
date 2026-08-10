@@ -1,5 +1,3 @@
-import ContextDev from "context.dev";
-import { zodSchema } from "ai";
 import { z } from "zod";
 import {
   normalizeBrandColorHex,
@@ -14,14 +12,29 @@ import {
 } from "@/lib/ad-run-policy";
 import { parsePublicHttpUrl } from "@/lib/public-url";
 
-function client() {
-  const key = process.env.CONTEXT_DEV_API_KEY?.trim();
-  if (!key) throw new Error("CONTEXT_DEV_API_KEY is not set");
-  return new ContextDev({ apiKey: key, maxRetries: 0 });
+/**
+ * Brand research, served by the brand-extractor service.
+ *
+ * One POST replaces what used to be four Context.dev calls. The service reads
+ * the site's own published data — schema.org, the store catalogue, the theme's
+ * stylesheets — and picks the products worth advertising, so everything below
+ * is a fact the site states rather than an inference about it.
+ *
+ * Every field is optional on the wire and validated here: this is an untrusted
+ * response even when it comes from our own service, and a partial extract must
+ * degrade the Brief rather than fail it.
+ */
+const DEFAULT_ENDPOINT = "http://127.0.0.1:8080";
+
+/** The extractor reads pages and calls a model; it is not a fast service. */
+const EXTRACT_TIMEOUT_MS = 90_000;
+
+export function extractorEndpoint(): string {
+  return process.env.BRAND_EXTRACTOR_URL?.trim() || DEFAULT_ENDPOINT;
 }
 
 export function hasContextConfiguration(): boolean {
-  return Boolean(process.env.CONTEXT_DEV_API_KEY?.trim());
+  return Boolean(extractorEndpoint());
 }
 
 export type BrandProfile = {
@@ -41,201 +54,201 @@ export type StyleguideProfile = {
 
 export type ProductProfile = Product;
 
-const productExtractionSchema = z
-  .object({
-    products: z
-      .array(
-        z
-          .object({
-            name: z
-              .string()
-              .trim()
-              .min(1)
-              .max(AD_RUN_LIMITS.productName)
-              .describe("The exact public name of a product or named service."),
-            description: z
-              .string()
-              .trim()
-              .min(1)
-              .max(AD_RUN_LIMITS.productDescription)
-              .describe(
-                "A concise factual description of what this specific product does.",
-              ),
-          })
-          .strict(),
-      )
-      .min(AD_PRODUCT_CONCEPT_MIN)
-      .max(AD_PRODUCT_CONCEPT_MAX)
-      .describe("Distinct flagship products or named services sold by the company."),
-  })
-  .strict();
-
-// Loose shape of the SDK response (typed just enough for what we read).
-type RawImage = { url?: string };
-type RawBrand = {
-  title?: string;
-  description?: string;
-  slogan?: string;
-  logos?: RawImage[];
-  industries?: { eic?: { industry?: string; subindustry?: string }[] };
+/** Everything one extract yields, in the shape the planner consumes. */
+export type BrandResearch = {
+  brand: BrandProfile;
+  styleguide: StyleguideProfile;
+  summary: string;
+  products: ProductProfile[];
 };
-type RawResponse = { brand?: RawBrand };
 
-export async function fetchBrand(
-  domain: string,
-  signal?: AbortSignal,
-): Promise<BrandProfile> {
-  const res = (await client().brand.retrieve(
-    { type: "by_domain", domain },
-    { signal },
-  )) as unknown as RawResponse;
-  const brand = res.brand ?? {};
-
-  const logos = (brand.logos ?? []).flatMap(({ url }) => {
-    if (typeof url !== "string") return [];
-    const normalized = parsePublicHttpUrl(url);
-    return normalized ? [normalized.href] : [];
-  });
-
-  const eic = brand.industries?.eic?.[0];
-  const industry = eic ? [eic.industry, eic.subindustry].filter(Boolean).join(" · ") : null;
-
-  return {
-    domain,
-    name: brand.title ?? null,
-    description: brand.description ?? null,
-    slogan: brand.slogan ?? null,
-    industry,
-    logoUrl: logos[0] ?? null,
-  };
+export class BrandExtractorError extends Error {
+  constructor(
+    readonly kind: "unreachable" | "no-extract" | "no-products" | "malformed",
+    message: string,
+  ) {
+    super(message);
+    this.name = "BrandExtractorError";
+  }
 }
+
+const sourced = <T extends z.ZodTypeAny>(value: T) =>
+  z.object({ value: value.nullish() }).partial().nullish();
+
+const productSchema = z.object({
+  name: z.string().nullish(),
+  description: z.string().nullish(),
+  images: z.array(z.string()).nullish(),
+});
+
+const responseSchema = z.object({
+  brand: z
+    .object({
+      name: sourced(z.string()),
+      logo: sourced(z.string()),
+      colors: sourced(z.record(z.string(), z.unknown())),
+      font: sourced(z.string()),
+      headline: sourced(z.string()),
+      description: sourced(z.string()),
+    })
+    .partial()
+    .nullish(),
+  flagships: z.array(productSchema).nullish(),
+  facts: z
+    .object({ sample_copy: z.array(z.string()).nullish() })
+    .partial()
+    .nullish(),
+  profile: z
+    .object({
+      tone: z.string().nullish(),
+      positioning: z.string().nullish(),
+    })
+    .partial()
+    .nullish(),
+});
+
+type ExtractResponse = z.infer<typeof responseSchema>;
+
+const valueOf = (node: { value?: unknown } | null | undefined): string | null => {
+  const raw = node?.value;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : null;
+};
 
 /**
- * Homepage as markdown. Doubles as the "is this site real / reachable" check —
- * callers treat a rejection here as "couldn't reach this domain".
+ * The extractor reports colours by role — primary/secondary/accent/background —
+ * and the Brief wants an ordered palette.
+ *
+ * Only the roles are used. `all` is the theme's full ranked list, which on a
+ * Tailwind site carries framework defaults (#9ca3af, #111827) alongside the
+ * brand's own colours; those are saturated enough to outrank the background
+ * when the prompt picks its pair, which turned NuPhy's teal-and-white into
+ * teal-and-blue. It is read only when the roles cannot fill a pair at all.
  */
-export async function scrapePage(url: string, signal?: AbortSignal): Promise<string> {
-  const res = await client().web.webScrapeMd(
-    { url, useMainContentOnly: true },
-    { signal },
-  );
-  return ((res as { markdown?: string }).markdown ?? "").slice(0, 4000);
-}
-
-type RawFontLink = { type?: unknown };
-type RawTextStyle = { fontFamily?: unknown };
-type RawStyleguide = {
-  colors?: { accent?: unknown; background?: unknown; text?: unknown };
-  fontLinks?: Record<string, RawFontLink>;
-  typography?: {
-    headings?: {
-      h1?: RawTextStyle;
-      h2?: RawTextStyle;
-      h3?: RawTextStyle;
-      h4?: RawTextStyle;
-    };
-    p?: RawTextStyle;
-  };
-  // Retained for compatibility with older styleguide responses.
-  mood?: unknown;
-  aesthetic?: unknown;
-  personality?: unknown;
-};
-
-function styleguideColors(colors: RawStyleguide["colors"]): BrandColor[] {
-  const roles = [
-    ["Accent", colors?.accent],
-    ["Background", colors?.background],
-    ["Text", colors?.text],
-  ] as const;
+function paletteFrom(colors: unknown): BrandColor[] {
+  if (!colors || typeof colors !== "object") return [];
+  const record = colors as Record<string, unknown>;
+  const named: BrandColor[] = [];
   const seen = new Set<string>();
-  return roles.flatMap(([name, value]) => {
+
+  const push = (value: unknown, name: string | null) => {
     const hex = typeof value === "string" ? normalizeBrandColorHex(value) : null;
-    if (!hex || seen.has(hex)) return [];
+    if (!hex || seen.has(hex)) return;
     seen.add(hex);
-    return [{ hex, name }];
-  });
-}
-
-function googleFontFamily(styleguide: RawStyleguide): string | null {
-  const { headings } = styleguide.typography ?? {};
-  const fontLinks = styleguide.fontLinks;
-  if (!fontLinks || typeof fontLinks !== "object" || Array.isArray(fontLinks)) {
-    return null;
-  }
-  const textStyles = [
-    headings?.h1,
-    headings?.h2,
-    headings?.h3,
-    headings?.h4,
-    styleguide.typography?.p,
-  ];
-  for (const textStyle of textStyles) {
-    const family = normalizeFontFamily(textStyle?.fontFamily);
-    if (
-      family &&
-      Object.hasOwn(fontLinks, family) &&
-      fontLinks[family]?.type === "google"
-    ) {
-      return family;
-    }
-  }
-  return null;
-}
-
-/** Palette and eligible typography extracted from the site's styleguide. */
-export async function fetchStyleguide(
-  domain: string,
-  signal?: AbortSignal,
-): Promise<StyleguideProfile> {
-  const res = (await client().web.extractStyleguide({ domain }, { signal })) as {
-    styleguide?: RawStyleguide;
+    named.push({ hex, name });
   };
-  const styleguide = res.styleguide ?? {};
-  const mood = [styleguide.mood, styleguide.aesthetic, styleguide.personality]
-    .filter((value): value is string => typeof value === "string" && value.length > 0)
-    .join(", ");
+
+  push(record.primary, "Accent");
+  push(record.background, "Background");
+  push(record.text ?? record.secondary, "Text");
+  push(record.accent, "Accent");
+
+  if (named.length < 2 && Array.isArray(record.all)) {
+    for (const value of record.all) push(value, null);
+  }
+  return named.slice(0, AD_RUN_LIMITS.palette);
+}
+
+/** A public raster URL the renderer may hand to a model, or nothing. */
+function logoFrom(value: string | null): string | null {
+  if (!value || value.length > AD_RUN_LIMITS.logoUrl) return null;
+  return parsePublicHttpUrl(value)?.href ?? null;
+}
+
+/**
+ * The extractor's `profile` is model-inferred rather than scraped, so only the
+ * fields that shape a look are read from it. `competitors` names real third
+ * parties on a guess and must never reach an ad.
+ */
+function researchFrom(domain: string, body: ExtractResponse): BrandResearch {
+  const brand = body.brand ?? {};
+  const products = (body.flagships ?? []).flatMap((product) => {
+    const name = (product.name ?? "").trim();
+    const description = (product.description ?? "").trim();
+    if (!name || !description) return [];
+    return [{
+      name: name.slice(0, AD_RUN_LIMITS.productName),
+      description: description.slice(0, AD_RUN_LIMITS.productDescription),
+      // First image only: the extractor lists them in the shop's own order, so
+      // the first is the primary shot. Same public-URL rules as the logo.
+      imageUrl: logoFrom((product.images ?? [])[0] ?? null),
+    }];
+  });
+
+  if (products.length < AD_PRODUCT_CONCEPT_MIN) {
+    throw new BrandExtractorError(
+      "no-products",
+      `extractor returned ${products.length} advertisable products`,
+    );
+  }
 
   return {
-    mood,
-    colors: styleguideColors(styleguide.colors),
-    fontFamily: googleFontFamily(styleguide),
+    brand: {
+      domain,
+      name: valueOf(brand.name),
+      description: valueOf(brand.description) ?? valueOf(brand.headline),
+      slogan: valueOf(brand.headline),
+      industry: body.profile?.positioning?.trim() || null,
+      logoUrl: logoFrom(valueOf(brand.logo)),
+    },
+    styleguide: {
+      mood: body.profile?.tone?.trim() || "",
+      colors: paletteFrom(brand.colors?.value),
+      fontFamily: normalizeFontFamily(valueOf(brand.font)),
+    },
+    summary: (body.facts?.sample_copy ?? []).join(" ").trim(),
+    products: products.slice(0, AD_PRODUCT_CONCEPT_MAX),
   };
 }
 
 /**
- * One to three fact-grounded products sold by the Brand. Context.dev crawls the
- * site against JSON Schema generated from the Zod contract; Zod then validates
- * the untrusted response again before the planner sees it.
+ * One domain -> everything the planner needs.
+ *
+ * `with_profile` is required, not optional: it is the switch that runs both
+ * model-backed steps, and without it there are no flagship products to
+ * advertise and no tone to render in.
  */
-export async function fetchProducts(
+export async function researchBrand(
   domain: string,
   signal?: AbortSignal,
-): Promise<ProductProfile[]> {
-  const schema = await zodSchema(productExtractionSchema).jsonSchema;
-  const res = await client().web.extract(
-    {
-      url: `https://${domain}`,
-      schema,
-      factCheck: true,
-      instructions: [
-        "Extract one to three distinct products or named services the company explicitly sells or offers.",
-        "Prefer flagship offerings with their exact public names and factual descriptions from official product pages.",
-        "Do not include the company itself, features, pricing tiers, blog posts, resources, jobs, or duplicate products.",
-      ].join(" "),
-      maxPages: 5,
-      maxDepth: 2,
-      stopAfterMs: 45_000,
-    },
-    { signal },
-  );
+): Promise<BrandResearch> {
+  const timeout = AbortSignal.timeout(EXTRACT_TIMEOUT_MS);
+  const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
 
-  const parsed = productExtractionSchema.parse(res.data);
-  const seen = new Set<string>();
-  return parsed.products.filter(({ name }) => {
-    const key = name.toLocaleLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  let response: Response;
+  try {
+    response = await fetch(new URL("/extract", extractorEndpoint()), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: `https://${domain}`, with_profile: true }),
+      signal: combined,
+    });
+  } catch (cause) {
+    if (signal?.aborted) throw cause;
+    throw new BrandExtractorError(
+      "unreachable",
+      `brand-extractor did not answer at ${extractorEndpoint()}`,
+    );
+  }
+
+  if (response.status === 422) {
+    throw new BrandExtractorError("no-extract", "extractor could not read that site");
+  }
+  if (!response.ok) {
+    throw new BrandExtractorError(
+      "unreachable",
+      `brand-extractor returned HTTP ${response.status}`,
+    );
+  }
+
+  let parsed: ExtractResponse;
+  try {
+    parsed = responseSchema.parse(await response.json());
+  } catch (cause) {
+    throw new BrandExtractorError(
+      "malformed",
+      `brand-extractor response did not parse: ${String(cause).slice(0, 200)}`,
+    );
+  }
+
+  return researchFrom(domain, parsed);
 }

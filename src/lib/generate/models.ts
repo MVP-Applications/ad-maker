@@ -17,58 +17,64 @@ export type ImageModelSizing = "aspect_ratio" | "pixel_size";
  *
  * The segment before the first slash is the routing provider consumed by
  * `gatewayImageModel`; everything after it is the provider's own model path.
- * Only the two primary OpenAI models accept a raster logo reference — the fal
- * models here are text-to-image endpoints whose editing variants live behind
- * separate `/edit` paths.
+ *
+ * `acceptsImage` is what drives tier membership. Only the two OpenAI models
+ * take a reference image — the fal entries here are text-to-image endpoints,
+ * whose editing variants live behind separate `/edit` paths — and a reference
+ * is worth far more on a Product ad, where the real article can be shown, than
+ * on a company ad. So the image-capable models sit in the secondary tier, which
+ * renders Products. The cost is that company ads no longer receive the logo.
  */
 export const IMAGE_MODELS = [
-  {
-    id: "openai/gpt-image-2",
-    tier: "primary",
-    displayName: "GPT Image 2",
-    rasterLogo: true,
-    sizing: "pixel_size",
-  },
-  {
-    id: "openai/gpt-image-1.5",
-    tier: "primary",
-    displayName: "GPT Image 1.5",
-    rasterLogo: true,
-    sizing: "pixel_size",
-  },
   {
     id: "fal/fal-ai/nano-banana-pro",
     tier: "primary",
     displayName: "Nano Banana Pro",
-    rasterLogo: false,
+    acceptsImage: false,
     sizing: "aspect_ratio",
   },
   {
     id: "fal/xai/grok-imagine-image",
-    tier: "secondary",
+    tier: "primary",
     displayName: "Grok Imagine",
-    rasterLogo: false,
+    acceptsImage: false,
     sizing: "aspect_ratio",
   },
   {
     id: "fal/fal-ai/bytedance/seedream/v4.5/text-to-image",
-    tier: "secondary",
+    tier: "primary",
     displayName: "Seedream 4.5",
-    rasterLogo: false,
+    acceptsImage: false,
     sizing: "aspect_ratio",
   },
   {
+    id: "openai/gpt-image-2",
+    tier: "secondary",
+    displayName: "GPT Image 2",
+    acceptsImage: true,
+    sizing: "pixel_size",
+  },
+  {
+    id: "openai/gpt-image-1.5",
+    tier: "secondary",
+    displayName: "GPT Image 1.5",
+    acceptsImage: true,
+    sizing: "pixel_size",
+  },
+  {
+    // Third Product slot: fal has no edit endpoint for Imagen, so this one
+    // stays text-only and its Product ad is drawn from the description alone.
     id: "fal/fal-ai/imagen4/preview/ultra",
     tier: "secondary",
     displayName: "Imagen 4 Ultra",
-    rasterLogo: false,
+    acceptsImage: false,
     sizing: "aspect_ratio",
   },
 ] as const satisfies readonly {
   id: string;
   tier: ImageModelTier;
   displayName: string;
-  rasterLogo: boolean;
+  acceptsImage: boolean;
   sizing: ImageModelSizing;
 }[];
 

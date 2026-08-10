@@ -38,6 +38,7 @@ const productConcept: PlannedConcept = {
     kind: "product",
     name: "Payments",
     description: "Accept payments online and in person.",
+    imageUrl: null,
   },
   headline: "Accept Anything",
   subheadline: "Payments built for every way customers pay",

@@ -8,7 +8,8 @@ vi.mock("ai", async (importOriginal) => {
 });
 
 import type { LanguageModel } from "ai";
-import type { AdBrief, Product } from "@/lib/ad-run";
+import type { AdBrief, PlannedConcept, Product } from "@/lib/ad-run";
+import { isPhotoSafe } from "./directions";
 import { imageModelById } from "./models";
 import { deriveSummaryFromMarkdown, pickConceptsAndCraftCopy } from "./brief";
 
@@ -30,14 +31,17 @@ const PRODUCTS: readonly Product[] = [
   {
     name: "Payment Links",
     description: "Create a payment page and share its link with customers.",
+    imageUrl: null,
   },
   {
     name: "Stripe Billing",
     description: "Manage subscriptions, invoices, and recurring revenue.",
+    imageUrl: null,
   },
   {
     name: "Stripe Checkout",
     description: "Use a prebuilt payment form for online purchases.",
+    imageUrl: null,
   },
 ];
 
@@ -47,6 +51,65 @@ describe("Brief concept planning", () => {
   beforeEach(() => {
     mocks.generateObject.mockReset();
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  });
+
+  describe("Products that have a photograph", () => {
+    const photographed = (indexes: number[]): Product[] =>
+      PRODUCTS.map((product, index) => ({
+        ...product,
+        imageUrl: indexes.includes(index)
+          ? `https://cdn.example/${index}.png`
+          : null,
+      }));
+    const productSlots = (concepts: readonly PlannedConcept[]) => concepts.slice(3);
+
+    // Run repeatedly: model assignment shuffles, so a single pass can pass by luck.
+    const runs = Array.from({ length: 12 }, (_, i) => i);
+
+    it.each(runs)("spends the image-capable models on them (run %i)", async () => {
+      mocks.generateObject.mockRejectedValue(new Error("planner unavailable"));
+
+      const concepts = await pickConceptsAndCraftCopy(
+        model,
+        brief,
+        photographed([1]),
+      );
+
+      // Only two of three Product-slot models accept a reference, so the one
+      // Product with a photo must get one of them rather than lose the draw.
+      const withPhoto = productSlots(concepts).find(
+        ({ subject }) => subject.kind === "product" && subject.imageUrl !== null,
+      );
+      expect(imageModelById(withPhoto!.model)?.acceptsImage).toBe(true);
+    });
+
+    it.each(runs)("steers them onto a direction that can show it (run %i)", async () => {
+      mocks.generateObject.mockRejectedValue(new Error("planner unavailable"));
+
+      const concepts = await pickConceptsAndCraftCopy(
+        model,
+        brief,
+        photographed([0, 1]),
+      );
+
+      for (const concept of productSlots(concepts)) {
+        if (concept.subject.kind !== "product" || !concept.subject.imageUrl) continue;
+        if (!imageModelById(concept.model)?.acceptsImage) continue;
+        // monochrome_crop, blueprint and friends re-invent their subject; a real
+        // photograph handed to one produces neither a faithful product nor art.
+        expect(isPhotoSafe(concept.key)).toBe(true);
+      }
+      expect(new Set(concepts.map(({ key }) => key)).size).toBe(concepts.length);
+    });
+
+    it("leaves a Product with no photograph on any direction", async () => {
+      mocks.generateObject.mockRejectedValue(new Error("planner unavailable"));
+
+      const concepts = await pickConceptsAndCraftCopy(model, brief, photographed([]));
+
+      expect(concepts).toHaveLength(3 + PRODUCTS.length);
+      expect(new Set(concepts.map(({ key }) => key)).size).toBe(concepts.length);
+    });
   });
 
   it.each([1, 2, 3] as const)(
@@ -179,6 +242,7 @@ describe("Brief concept planning", () => {
         {
           name: "Stripe Tax",
           description: "Automate sales tax calculations and collection.",
+          imageUrl: null,
         },
       ] as Product[],
     ],

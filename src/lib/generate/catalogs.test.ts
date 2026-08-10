@@ -19,19 +19,26 @@ test("direction metadata is the source of typed keys and lookup results", () => 
   expect(directionByKey("not-a-direction")).toBeUndefined();
 });
 
-test("Image Model records own tier, display name, and raster-logo capability", () => {
+test("Image Model records own tier, display name, and image-input capability", () => {
   const id: ImageModelId = "openai/gpt-image-2";
   expect(IMAGE_MODELS).toHaveLength(6);
   expect(imageModelsByTier("primary")).toHaveLength(3);
   expect(imageModelsByTier("secondary")).toHaveLength(3);
   expect(imageModelById(id)).toEqual({
     id,
-    tier: "primary",
+    tier: "secondary",
     displayName: "GPT Image 2",
-    rasterLogo: true,
+    acceptsImage: true,
     sizing: "pixel_size",
   });
   expect(imageModelById("not-a-model")).toBeUndefined();
+});
+
+test("the models that accept a reference render the Product slots", () => {
+  // A reference image is worth more on a Product ad, where the real article can
+  // be shown, than on a company ad — so capability decides tier membership.
+  expect(imageModelsByTier("primary").every((m) => !m.acceptsImage)).toBe(true);
+  expect(imageModelsByTier("secondary").filter((m) => m.acceptsImage)).toHaveLength(2);
 });
 
 test("Image Model assignment is unique and primary-first", () => {

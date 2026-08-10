@@ -36,6 +36,7 @@ const plan: AdRunPlan = {
             kind: "product" as const,
             name: "Payments",
             description: "Accept payments online and in person.",
+            imageUrl: null,
           },
     headline: `Concept ${index + 1}`,
     subheadline: "A concise supporting line",

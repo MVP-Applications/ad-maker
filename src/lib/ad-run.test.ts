@@ -31,16 +31,19 @@ const products = [
     kind: "product",
     name: "Payments",
     description: "Accept payments online and in person.",
+    imageUrl: null,
   },
   {
     kind: "product",
     name: "Billing",
     description: "Manage recurring revenue and subscriptions.",
+    imageUrl: null,
   },
   {
     kind: "product",
     name: "Connect",
     description: "Power payments and payouts for platforms.",
+    imageUrl: null,
   },
 ] as const satisfies readonly Extract<ConceptSubject, { kind: "product" }>[];
 
@@ -122,6 +125,7 @@ test("rejects duplicate Products case-insensitively", () => {
     kind: "product",
     name: "  PAYMENTS  ",
     description: "A duplicate extracted Product.",
+    imageUrl: null,
   };
 
   expect(() => decodeAdRunPlan(duplicateProduct)).toThrow();
@@ -133,6 +137,7 @@ test("rejects Product subjects outside shared field bounds", () => {
     kind: "product",
     name: "n".repeat(AD_RUN_LIMITS.productName + 1),
     description: "A grounded description.",
+    imageUrl: null,
   };
   expect(() => decodeAdRunPlan(longName)).toThrow();
 
@@ -141,6 +146,7 @@ test("rejects Product subjects outside shared field bounds", () => {
     kind: "product",
     name: "Payments",
     description: "d".repeat(AD_RUN_LIMITS.productDescription + 1),
+    imageUrl: null,
   };
   expect(() => decodeAdRunPlan(longDescription)).toThrow();
 
@@ -149,6 +155,7 @@ test("rejects Product subjects outside shared field bounds", () => {
     kind: "product",
     name: "   ",
     description: "A grounded description.",
+    imageUrl: null,
   };
   expect(() => decodeAdRunPlan(emptyProductField)).toThrow();
 });
@@ -258,6 +265,7 @@ test("round-trips a bounded Product subject in the canonical Rendered Ad href", 
       kind: "product",
       name: "  Payments  ",
       description: "  Accept payments online and in person.  ",
+      imageUrl: null,
     },
   };
   const href = renderedAdHref(brief, productConcept);
@@ -287,6 +295,7 @@ test("round-trips a bounded Product subject in the canonical Rendered Ad href", 
     kind: "product",
     name: "Payments",
     description: "Accept payments online and in person.",
+    imageUrl: null,
   });
   expect(decoded.canonicalHref).toBe(href);
 });

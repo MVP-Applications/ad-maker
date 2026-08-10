@@ -6,15 +6,18 @@ import {
 } from "@/lib/generate/planner";
 import { normalizeDomain } from "@/lib/net";
 
-export const maxDuration = 120;
+// brand-extractor reads the catalogue, the theme's stylesheets, and the chosen
+// products' own pages before answering — 15-60s on the stores measured, and the
+// concept call still has to run after it.
+export const maxDuration = 180;
 
 /**
  * GET /api/brief?domain=stripe.com&v=3
  *
- * The single entry point: pulls brand data, products, homepage, and styleguide
- * palette/typography from Context.dev, then one LLM call plans three Company
- * ads plus one to three Product ads. GET + Cache-Control lets identical
- * versioned plans reuse the Vercel CDN instead of re-burning API credits.
+ * The single entry point: one call to brand-extractor for brand data, palette,
+ * typography, and flagship products, then one LLM call plans three Company ads
+ * plus one to three Product ads. GET + Cache-Control lets identical versioned
+ * plans reuse the CDN instead of re-running the extract.
  */
 const CACHE_OK = "public, s-maxage=3600, stale-while-revalidate=86400";
 const NO_STORE = { "Cache-Control": "no-store", "CDN-Cache-Control": "no-store" };
@@ -35,6 +38,8 @@ function failureResponse(failure: AdRunPlanningFailure) {
     case "brand-unavailable":
       return fail("Couldn't load brand data for that domain. Try another one.", 502);
     case "products-unavailable":
+      // The extractor reads published catalogue data, so a site without one
+      // lands here — most often a business that does not sell online.
       return fail("Couldn't find products to advertise on that site. Try another one.", 502);
     case "internal":
       console.error("[brief] Ad Run planning failed:", failure.cause);

@@ -28,14 +28,17 @@ function planFor(
     {
       name: "Payments",
       description: "Programmable payment acceptance for internet businesses.",
+      imageUrl: null,
     },
     {
       name: "Billing",
       description: "Subscription and invoicing tools for recurring revenue.",
+      imageUrl: null,
     },
     {
       name: "Connect",
       description: "Payments infrastructure for platforms and marketplaces.",
+      imageUrl: null,
     },
   ] as const;
   const concepts: PlannedConcept[] = CREATIVE_DIRECTIONS.slice(
@@ -53,6 +56,7 @@ function planFor(
               kind: "product" as const,
               name: product.name,
               description: product.description,
+              imageUrl: product.imageUrl,
             },
       headline: `Concept ${index + 1}`,
       subheadline: "A concise supporting line",

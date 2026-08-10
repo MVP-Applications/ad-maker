@@ -11,12 +11,11 @@ import {
   type BrandColor,
 } from "@/lib/brand-color";
 import {
-  fetchBrand,
-  fetchProducts,
-  fetchStyleguide,
+  BrandExtractorError,
   hasContextConfiguration,
-  scrapePage,
+  researchBrand,
   type BrandProfile,
+  type BrandResearch,
   type StyleguideProfile,
 } from "@/lib/context";
 import { normalizeFontFamily } from "@/lib/font-family";
@@ -42,18 +41,12 @@ export type AdRunPlanningResult =
   | { ok: false; error: AdRunPlanningFailure };
 
 /**
- * Behavior-level adapters used by the Ad Run planning module. External SDK
- * objects and environment-variable names stay behind this seam.
+ * Behavior-level adapters used by the Ad Run planning module. The research
+ * service and environment-variable names stay behind this seam.
  */
 export type BrandResearchAdapter = {
   isReady(): boolean;
-  fetchBrand(domain: string, signal?: AbortSignal): Promise<BrandProfile>;
-  scrapePage(url: string, signal?: AbortSignal): Promise<string>;
-  fetchStyleguide(
-    domain: string,
-    signal?: AbortSignal,
-  ): Promise<StyleguideProfile>;
-  fetchProducts(domain: string, signal?: AbortSignal): Promise<Product[]>;
+  research(domain: string, signal?: AbortSignal): Promise<BrandResearch>;
 };
 
 export type ConceptPlanningAdapter = {
@@ -78,6 +71,27 @@ export type AdRunPlanner = (
 const bounded = (value: string | null | undefined, max: number): string =>
   (value ?? "").trim().slice(0, max);
 
+/**
+ * One research call now carries what four used to, so its failure has to say
+ * which of them it stood in for — the Brief route turns each of these into a
+ * different message, and "site we cannot read" is not "service that is down".
+ */
+function researchFailure(cause: unknown): AdRunPlanningFailure {
+  if (cause instanceof BrandExtractorError) {
+    switch (cause.kind) {
+      case "unreachable":
+        return { code: "not-configured" };
+      case "no-extract":
+        return { code: "domain-unreachable", cause };
+      case "no-products":
+        return { code: "products-unavailable", cause };
+      case "malformed":
+        return { code: "brand-unavailable", cause };
+    }
+  }
+  return { code: "internal", cause };
+}
+
 function boundedColors(colors: readonly BrandColor[]): BrandColor[] {
   return colors
     .flatMap((color) => {
@@ -98,7 +112,7 @@ function boundedLogoUrl(value: string | null): string | null {
 function buildBrief(
   domain: string,
   brand: BrandProfile,
-  markdown: string,
+  summary: string,
   styleguide: StyleguideProfile,
 ): AdBrief {
   const colors = boundedColors(styleguide.colors);
@@ -113,7 +127,7 @@ function buildBrief(
     brandName,
     description,
     industry: bounded(brand.industry, AD_RUN_LIMITS.industry),
-    summary: deriveSummaryFromMarkdown(markdown),
+    summary: deriveSummaryFromMarkdown(summary),
     mood: bounded(styleguide.mood, AD_RUN_LIMITS.mood) || DEFAULT_MOOD,
     fontFamily: normalizeFontFamily(styleguide.fontFamily),
     colorA: bounded(colorA, AD_RUN_LIMITS.promptColor),
@@ -143,46 +157,25 @@ export function createAdRunPlanner(adapters: AdRunPlannerAdapters): AdRunPlanner
         return { ok: false, error: { code: "not-configured" } };
       }
 
-      const [brandResult, pageResult, styleguideResult, productsResult] =
-        await Promise.allSettled([
-          adapters.research.fetchBrand(domain, signal),
-          adapters.research.scrapePage(`https://${domain}`, signal),
-          adapters.research.fetchStyleguide(domain, signal),
-          adapters.research.fetchProducts(domain, signal),
-        ]);
+      let research: BrandResearch;
+      try {
+        research = await adapters.research.research(domain, signal);
+      } catch (cause) {
+        if (signal?.aborted) return { ok: false, error: { code: "aborted" } };
+        return { ok: false, error: researchFailure(cause) };
+      }
 
       if (signal?.aborted) return { ok: false, error: { code: "aborted" } };
 
-      if (brandResult.status === "rejected" && pageResult.status === "rejected") {
-        return {
-          ok: false,
-          error: { code: "domain-unreachable", cause: brandResult.reason },
-        };
-      }
-      if (brandResult.status === "rejected") {
-        return {
-          ok: false,
-          error: { code: "brand-unavailable", cause: brandResult.reason },
-        };
-      }
-      if (productsResult.status === "rejected") {
-        return {
-          ok: false,
-          error: { code: "products-unavailable", cause: productsResult.reason },
-        };
-      }
-
       const brief = buildBrief(
         domain,
-        brandResult.value,
-        pageResult.status === "fulfilled" ? pageResult.value : "",
-        styleguideResult.status === "fulfilled"
-          ? styleguideResult.value
-          : { mood: DEFAULT_MOOD, colors: [], fontFamily: null },
+        research.brand,
+        research.summary,
+        research.styleguide,
       );
       const concepts = await adapters.concepts.planConcepts(
         brief,
-        productsResult.value,
+        research.products,
         signal,
       );
       if (signal?.aborted) return { ok: false, error: { code: "aborted" } };
@@ -201,10 +194,7 @@ export function createAdRunPlanner(adapters: AdRunPlannerAdapters): AdRunPlanner
 const productionPlanner = createAdRunPlanner({
   research: {
     isReady: hasContextConfiguration,
-    fetchBrand,
-    scrapePage,
-    fetchStyleguide,
-    fetchProducts,
+    research: researchBrand,
   },
   concepts: {
     isReady: hasGatewayConfiguration,

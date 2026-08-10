@@ -111,10 +111,10 @@ All twelve prompt templates share a strict typography spec (the only text allowe
 
 ```
 ┌──────────────┐ GET /api/brief?domain=…&v=3 ┌──────────────────┐
-│ Paste domain │ ──────────────────────────▶ │  Context.dev API │
+│ Paste domain │ ──────────────────────────▶ │  brand-extractor │
 └──────────────┘                             └──────────────────┘
-                        │  brand + homepage md + styleguide palette/typography
-                        │  + 1–3 fact-grounded products via web.extract + Zod JSON Schema
+                        │  brand + palette + typeface + the brand's own copy
+                        │  + 1–3 flagship products, described from their own pages
                         ▼
         ┌────────────────────────────────────────────────────┐
         │  one LLM call plans 3 company concepts followed by │  gpt-5.4-mini
@@ -129,24 +129,35 @@ All twelve prompt templates share a strict typography spec (the only text allowe
         Ads stream into the gallery · Download · Share on X
 ```
 
-1. **The brief** — `GET /api/brief` makes four Context.dev calls in parallel: Brand data, homepage Markdown, styleguide extraction, and structured web extraction. Product extraction uses a JSON Schema generated from Zod and Context.dev fact checking. The planner derives two describable colors from the styleguide's accent/background/text palette and carries a typography family only when the styleguide marks it as a Google Font. One LLM call then writes three company concepts followed by one concept for each of the one to three distinct Products. Successful responses are shared-cacheable per versioned domain key (`s-maxage=3600`, one-day stale-while-revalidate).
+1. **The brief** — `GET /api/brief` makes one call to [brand-extractor](../brand-extractor), which returns brand data, the theme's palette and typeface, the brand's own copy, and one to three flagship products described from their own pages. The planner derives two describable colors from the accent/background/text roles and carries a typeface only when the site states one. One LLM call then writes three company concepts followed by one concept per Product. Successful responses are shared-cacheable per versioned domain key (`s-maxage=3600`, one-day stale-while-revalidate). Budget ~45s: the extract reads the catalogue and the chosen products' pages before answering.
 2. **The ads** — the client fires 4–6 parallel `GET /api/ad` requests, one per Planned Concept. Everything the prompt needs — including whether the subject is the company or a specific Product — travels in the query string, so compatible CDNs can cache each finished image by its full URL (`s-maxage=86400`, seven-day stale-while-revalidate). The three primary models can receive a validated raster logo as an image reference; unsupported or rejected logo inputs fall back to text-only generation. Transient failures retry with backoff; failed slots expose a per-ad Retry button, and errors are never cached.
 3. **Ship** — each ad fades into the dynamically sized gallery as its model finishes. Download one, download every finished ad, or share to X.
 
 ---
 
-## Context.dev APIs used
+## Brand research
 
-Branda makes exactly four Context.dev calls, all isolated in [`src/lib/context.ts`](./src/lib/context.ts). These links are the canonical API pages listed in the [Context.dev documentation sitemap](https://docs.context.dev/sitemap.xml).
+Branda makes exactly one research call, isolated in [`src/lib/context.ts`](./src/lib/context.ts):
 
-| SDK operation | What Branda uses it for | API reference |
-|---|---|---|
-| `client.brand.retrieve` | Brand name, description, slogan, industry, and logo | [Retrieve Brand Data](https://docs.context.dev/api-reference/brand-intelligence/brand) |
-| `client.web.webScrapeMd` | Homepage Markdown for grounded company copy and reachability checks | [Scrape Markdown](https://docs.context.dev/api-reference/web-scraping/markdown) |
-| `client.web.extractStyleguide` | Accent/background/text colors, visual mood, and eligible Google Font metadata | [Extract Styleguide](https://docs.context.dev/api-reference/brand-intelligence/styleguide) |
-| `client.web.extract` | One to three Products against a Zod-derived JSON Schema, with fact checking | [Extract Structured Data](https://docs.context.dev/api-reference/web-extraction/extract) |
+```
+POST http://127.0.0.1:8080/extract  { "url": "https://nuphy.com", "with_profile": true }
+```
 
-Want to use the same APIs in your own app? [Create a Context.dev API key](https://link.context.dev/branda).
+[brand-extractor](../brand-extractor) reads what the site publishes for machines — schema.org, the store catalogue, `sitemap.xml`, the theme's stylesheets — and returns one document:
+
+| Field read | What Branda uses it for |
+|---|---|
+| `brand.name` | The wordmark printed on every ad, re-cased from the shop's own product names |
+| `brand.logo` | The raster reference handed to the models that accept one |
+| `brand.colors` | Accent/background/text roles, converted to describable phrases |
+| `brand.font` | The brand's typeface, from a Google Fonts link or the theme's own CSS |
+| `flagships` | One to three products worth advertising, described from their own pages |
+| `facts.sample_copy` | The brand's own words, so company copy reflects its voice |
+| `profile.tone` / `profile.positioning` | Visual mood and how the brand competes |
+
+> `profile` is model-inferred rather than scraped. Only `tone` and `positioning` are read from it — `competitors` names real third parties on a guess and must never reach an ad.
+
+**This means Branda only works on sites that publish a product catalogue.** A business with nothing machine-readable to sell yields no flagships, and an Ad Run needs at least one.
 
 ---
 
@@ -155,7 +166,7 @@ Want to use the same APIs in your own app? [Create a Context.dev API key](https:
 **Prerequisites:**
 
 - Node.js ≥ 20
-- A free [Context.dev API key](https://link.context.dev/branda) — Brand data, Markdown scraping, styleguide extraction, and structured Product extraction
+- The [brand-extractor](../brand-extractor) service running — brand data, palette, typography, and flagship products. Start it with `uvicorn brand_extractor.api:app --port 8080`
 - An [OpenAI API key](https://platform.openai.com/api-keys) — concept copy plus the two primary `gpt-image` models
 - A [fal.ai key](https://fal.ai/dashboard/keys) — the four fal-routed image models
 
@@ -169,7 +180,8 @@ npm install
 
 # 3. Configure
 cp .env.example .env
-# add CONTEXT_DEV_API_KEY, OPENAI_API_KEY, and FAL_KEY to .env
+# add OPENAI_API_KEY and FAL_KEY to .env
+# BRAND_EXTRACTOR_URL is optional — it defaults to http://127.0.0.1:8080
 
 # 4. Run
 npm run dev      # http://localhost:3000
@@ -188,7 +200,7 @@ All configuration is environment variables (see `.env.example`).
 
 | Variable | Required | Description |
 |---|---|---|
-| `CONTEXT_DEV_API_KEY` | Yes | [Context.dev](https://link.context.dev/branda) key — powers all four [Context.dev API calls](#contextdev-apis-used) |
+| `BRAND_EXTRACTOR_URL` | No | Where the [brand-extractor](../brand-extractor) service is listening. Defaults to `http://127.0.0.1:8080` |
 | `OPENAI_API_KEY` | Yes | [OpenAI](https://platform.openai.com/api-keys) key — concept picking + copy (`gpt-5.4-mini`) and the two primary `gpt-image` models |
 | `FAL_KEY` | Yes | [fal.ai](https://fal.ai/dashboard/keys) key — the four fal-routed image models |
 
@@ -210,7 +222,7 @@ The UI and renderer are separable from Context.dev enrichment, so you can reuse 
 
 `npm run build && npm run start` runs the production app. On Vercel, import the repo and set the two required environment variables; the route hints allow up to 120 seconds for brief planning and 300 seconds for image rendering, so other hosts need equivalent request limits.
 
-The included `/api/brief` and `/api/ad` routes invoke billable services and are intentionally callable by the browser. Before exposing your own deployment, add authentication and/or rate limiting appropriate to your audience, set provider spend alerts, and understand the cost of up to four Context.dev calls, one text-model call, and six image-model calls per uncached Ad Run. Successful responses benefit from a compatible shared CDN cache; failures use `no-store`.
+The included `/api/brief` and `/api/ad` routes invoke billable services and are intentionally callable by the browser. Before exposing your own deployment, add authentication and/or rate limiting appropriate to your audience, set provider spend alerts, and understand the cost of one extract (two cheap model calls inside it), one text-model call, and six image-model calls per uncached Ad Run. `brand-extractor` must be reachable from wherever Branda runs, and it is not a public service — keep it on a private network. Successful responses benefit from a compatible shared CDN cache; failures use `no-store`.
 
 The app loads [Plausible](https://plausible.io) (privacy-friendly, cookieless analytics) via a script tag in `src/app/layout.tsx`; forks should swap in their own Plausible script URL or remove the tag. The default UI also requests a Google-hosted font and Google favicon service; privacy-sensitive forks can self-host or remove those requests.
 
@@ -249,7 +261,7 @@ src/
     ad-run.ts               # shared Ad Run contract, invariants, and canonical GET codecs
     brand-color.ts          # canonical Brand color validation
     font-family.ts          # safe styleguide Google Font family validation
-    context.ts              # Context.dev Brand, page, styleguide, and Product adapter
+    context.ts              # brand-extractor adapter: one extract -> Brief + Products
     net.ts                  # canonical domain normalization
     public-raster.ts        # DNS-pinned, size-bounded public logo loading
     public-url.ts           # cross-runtime public URL syntax policy
@@ -270,7 +282,7 @@ public/                     # logo, cover, ad examples
 ## Tech stack
 
 - ▲ **Next.js 15** (App Router) + React 19 + TypeScript
-- ⚡ **[Context.dev](https://context.dev)** — [Brand data](https://docs.context.dev/api-reference/brand-intelligence/brand), [homepage Markdown](https://docs.context.dev/api-reference/web-scraping/markdown), [styleguide extraction](https://docs.context.dev/api-reference/brand-intelligence/styleguide), and [structured Product extraction](https://docs.context.dev/api-reference/web-extraction/extract)
+- 🔎 **[brand-extractor](../brand-extractor)** — brand data, palette, typeface, the brand's own copy, and flagship product selection, read from what the site publishes for machines
 - 🤖 **Vercel AI SDK** with direct providers (`@ai-sdk/openai`, `@ai-sdk/fal`) — `gpt-5.4-mini` for concept picking & copy; `gpt-image-2`, `gpt-image-1.5`, `nano-banana-pro`, `grok-imagine-image`, `seedream-4.5`, and `imagen4-ultra` for the ads (one per ad)
 - 🌍 **Vercel CDN** — briefs and finished ads cached at the edge via `Cache-Control: s-maxage`
 - 🎨 **Tailwind CSS** + **Geist** font
