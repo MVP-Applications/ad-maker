@@ -10,7 +10,7 @@ vi.mock("ai", async (importOriginal) => {
 import type { LanguageModel } from "ai";
 import type { AdBrief, PlannedConcept, Product } from "@/lib/ad-run";
 import { isPhotoSafe } from "./directions";
-import { imageModelById } from "./models";
+import { imageModelById, takesProductPhoto } from "./models";
 import { deriveSummaryFromMarkdown, pickConceptsAndCraftCopy } from "./brief";
 
 const brief: AdBrief = {
@@ -80,7 +80,7 @@ describe("Brief concept planning", () => {
       const withPhoto = productSlots(concepts).find(
         ({ subject }) => subject.kind === "product" && subject.imageUrl !== null,
       );
-      expect(imageModelById(withPhoto!.model)?.acceptsImage).toBe(true);
+      expect(takesProductPhoto(imageModelById(withPhoto!.model)!)).toBe(true);
     });
 
     it.each(runs)("steers them onto a direction that can show it (run %i)", async () => {
@@ -94,7 +94,7 @@ describe("Brief concept planning", () => {
 
       for (const concept of productSlots(concepts)) {
         if (concept.subject.kind !== "product" || !concept.subject.imageUrl) continue;
-        if (!imageModelById(concept.model)?.acceptsImage) continue;
+        if (!takesProductPhoto(imageModelById(concept.model)!)) continue;
         // monochrome_crop, blueprint and friends re-invent their subject; a real
         // photograph handed to one produces neither a faithful product nor art.
         expect(isPhotoSafe(concept.key)).toBe(true);

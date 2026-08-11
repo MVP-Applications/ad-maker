@@ -4,12 +4,15 @@ import { fetchPublicRaster, type PublicRaster } from "@/lib/public-raster";
 import { buildConceptPrompt } from "./concepts";
 import {
   classifyGatewayImageError,
+  falEditImage,
   gatewayImageModel,
   hasGatewayConfiguration,
   type GatewayImageFailure,
 } from "./gateway";
 import {
   imageModelById,
+  takesLogo,
+  takesProductPhoto,
   type ImageModelId,
   type ImageModelSizing,
 } from "./models";
@@ -61,10 +64,21 @@ export type ImageQuality = "medium" | "high";
 const qualityFor = (query: RenderedAdQuery): ImageQuality =>
   query.subject.kind === "product" && query.subject.imageUrl ? "high" : "medium";
 
+/**
+ * The one reference image, in the form its model can take it.
+ *
+ * `bytes` rides along with the prompt; `edit` names fal's editing path and
+ * sends the picture's URL, which is the only way a fal model looks at it at
+ * all. Both are validated the same way before they get here.
+ */
+export type ImageAttachment =
+  | { kind: "bytes"; raster: PublicRaster }
+  | { kind: "edit"; path: string; url: string };
+
 export type ImageGenerationRequest = {
   model: ImageModelId;
   prompt: string;
-  logo: PublicRaster | null;
+  attachment: ImageAttachment | null;
   square: SquareSpec;
   quality: ImageQuality;
 };
@@ -106,8 +120,8 @@ const PRODUCT_INSTRUCTION = (productName: string) =>
     `COLOUR OVERRIDE — this outranks the palette instructions above: the brand colours apply to the BACKGROUND, the lighting, and the TYPOGRAPHY only. The product itself keeps its own real colours and materials exactly as photographed. Do not tint, recolour, or restyle it to match the palette.`,
   ].join("\n\n");
 
-/** What one reference image is, so the prompt can say so. */
-type Reference = { raster: PublicRaster; instruction: string };
+/** What one reference image is, and how its model takes it. */
+type Reference = { attachment: ImageAttachment; instruction: string };
 
 const TRANSIENT_DELAYS = [800, 1800] as const;
 
@@ -150,26 +164,43 @@ export function createAdRenderer(dependencies: AdRendererDependencies): AdRender
       // One reference image per render. A Product ad spends it on the product
       // itself — showing the real article beats reproducing the wordmark on an
       // ad whose whole subject is that article. Company ads still get the logo.
-      const candidate =
+      const photo =
         query.subject.kind === "product" && query.subject.imageUrl
-          ? { url: query.subject.imageUrl, instruction: PRODUCT_INSTRUCTION(query.subject.name) }
-          : query.logoUrl
+          ? { url: query.subject.imageUrl, name: query.subject.name }
+          : null;
+
+      const candidate =
+        photo && takesProductPhoto(model)
+          ? { url: photo.url, instruction: PRODUCT_INSTRUCTION(photo.name) }
+          : !photo && query.logoUrl && takesLogo(model)
             ? { url: query.logoUrl, instruction: LOGO_INSTRUCTION(query.brandName) }
             : null;
 
+      // Loaded even when only its URL is sent onward: this is the check that the
+      // address is a public, size-bounded raster, and it must run either way.
       let reference: Reference | null = null;
-      if (model.acceptsImage && candidate) {
+      if (candidate) {
         try {
           const raster = await dependencies.loadRaster(candidate.url, signal);
-          if (raster) reference = { raster, instruction: candidate.instruction };
+          if (raster) {
+            reference = {
+              instruction: candidate.instruction,
+              attachment:
+                model.reference.kind === "fal_edit"
+                  ? { kind: "edit", path: model.reference.path, url: candidate.url }
+                  : { kind: "bytes", raster },
+            };
+          }
         } catch {
           // A reference is enrichment, never a reason to lose the Rendered Ad.
         }
         if (signal?.aborted) return { ok: false, error: { code: "aborted" } };
       }
 
-      let logo: PublicRaster | null = reference?.raster ?? null;
-      let prompt = reference ? `${basePrompt}\n\n${reference.instruction}` : basePrompt;
+      let attachment: ImageAttachment | null = reference?.attachment ?? null;
+      let prompt = reference
+        ? `${basePrompt}\n\n${reference.instruction}`
+        : basePrompt;
       let logoDowngraded = false;
       let transientFailures = 0;
 
@@ -182,7 +213,7 @@ export function createAdRenderer(dependencies: AdRendererDependencies): AdRender
             {
               model: query.model,
               prompt,
-              logo,
+              attachment,
               square: SQUARE[model.sizing],
               quality: qualityFor(query),
             },
@@ -210,10 +241,10 @@ export function createAdRenderer(dependencies: AdRendererDependencies): AdRender
 
         if (
           generated.error.kind === "image_input_rejected" &&
-          logo !== null &&
+          attachment !== null &&
           !logoDowngraded
         ) {
-          logo = null;
+          attachment = null;
           prompt = basePrompt;
           logoDowngraded = true;
           continue;
@@ -249,10 +280,27 @@ async function generateImage(
   signal?: AbortSignal,
 ): Promise<ImageGenerationResult> {
   try {
+    if (request.attachment?.kind === "edit") {
+      const edited = await falEditImage(
+        {
+          path: request.attachment.path,
+          prompt: request.prompt,
+          imageUrl: request.attachment.url,
+          aspectRatio: "1:1",
+        },
+        signal,
+      );
+      const editedType = mediaType(edited.mediaType);
+      if (!editedType || edited.bytes.byteLength === 0) {
+        return { ok: false, error: { kind: "nontransient" } };
+      }
+      return { ok: true, value: { bytes: edited.bytes, mediaType: editedType } };
+    }
+
     const { image } = await generateImageWithAi({
       model: gatewayImageModel(request.model),
-      prompt: request.logo
-        ? { text: request.prompt, images: [request.logo.bytes] }
+      prompt: request.attachment
+        ? { text: request.prompt, images: [request.attachment.raster.bytes] }
         : request.prompt,
       ...(request.square.kind === "pixel_size"
         ? { size: request.square.size }
@@ -271,7 +319,7 @@ async function generateImage(
   } catch (error) {
     return {
       ok: false,
-      error: classifyGatewayImageError(error, request.logo !== null, signal),
+      error: classifyGatewayImageError(error, request.attachment !== null, signal),
     };
   }
 }

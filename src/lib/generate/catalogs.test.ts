@@ -9,6 +9,8 @@ import {
   assignImageModels,
   imageModelById,
   imageModelsByTier,
+  takesLogo,
+  takesProductPhoto,
   type ImageModelId,
 } from "./models";
 
@@ -28,17 +30,38 @@ test("Image Model records own tier, display name, and image-input capability", (
     id,
     tier: "secondary",
     displayName: "GPT Image 2",
-    acceptsImage: true,
+    reference: { kind: "native" },
     sizing: "pixel_size",
   });
   expect(imageModelById("not-a-model")).toBeUndefined();
 });
 
-test("the models that accept a reference render the Product slots", () => {
-  // A reference image is worth more on a Product ad, where the real article can
-  // be shown, than on a company ad — so capability decides tier membership.
-  expect(imageModelsByTier("primary").every((m) => !m.acceptsImage)).toBe(true);
-  expect(imageModelsByTier("secondary").filter((m) => m.acceptsImage)).toHaveLength(2);
+test("every Product slot can be shown the real product", () => {
+  // fal's text-to-image endpoints accept an image field and ignore it, so a
+  // Product photo only counts where the model reaches fal's editing path or
+  // takes images natively. Both kinds hold Product slots; neither company-only
+  // model does.
+  expect(imageModelsByTier("secondary").every(takesProductPhoto)).toBe(true);
+  expect(
+    imageModelsByTier("secondary").filter((m) => m.reference.kind === "fal_edit"),
+  ).toHaveLength(2);
+});
+
+test("a logo only ever travels to a model that takes images natively", () => {
+  // An editing endpoint starts from the picture it is given: a logo sent to one
+  // comes back defaced rather than placed in an advertisement.
+  for (const model of IMAGE_MODELS) {
+    if (model.reference.kind !== "native") expect(takesLogo(model)).toBe(false);
+  }
+  expect(IMAGE_MODELS.filter(takesLogo)).toHaveLength(2);
+});
+
+test("every fal edit path is a sibling of its own model", () => {
+  for (const model of IMAGE_MODELS) {
+    if (model.reference.kind !== "fal_edit") continue;
+    const bare = model.id.replace(/^fal\//, "").replace(/\/text-to-image$/, "");
+    expect(model.reference.path).toBe(`${bare}/edit`);
+  }
 });
 
 test("Image Model assignment is unique and primary-first", () => {

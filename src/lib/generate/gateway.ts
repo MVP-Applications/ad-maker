@@ -3,7 +3,6 @@ import "server-only";
 import { createFal } from "@ai-sdk/fal";
 import { createOpenAI } from "@ai-sdk/openai";
 import type { ImageModel, LanguageModel } from "ai";
-import type { ImageModelId } from "./models";
 
 /**
  * Direct provider keys, one per routing prefix used in the Image Model
@@ -33,7 +32,7 @@ export function gatewayTextModel(model: "openai/gpt-5.4-mini"): LanguageModel {
   return createOpenAI({ apiKey: apiKey("OPENAI_API_KEY") })(route(model).path);
 }
 
-export function gatewayImageModel(model: ImageModelId): ImageModel {
+export function gatewayImageModel(model: string): ImageModel {
   const { provider, path } = route(model);
   switch (provider) {
     case "openai":
@@ -43,6 +42,89 @@ export function gatewayImageModel(model: ImageModelId): ImageModel {
     default:
       throw new Error(`No provider configured for ${provider}`);
   }
+}
+
+/**
+ * fal's editing paths, over REST rather than the AI SDK.
+ *
+ * Two measured facts force this. fal's text-to-image endpoints accept an image
+ * field and ignore it — an AEN perfume bottle handed to `nano-banana-pro` came
+ * back as a leather bag for an invented brand — so a Product photo must reach
+ * the `/edit` path to matter. And the AI SDK cannot reach it: it sends
+ * `image_url` where those endpoints require `image_urls`, failing every call
+ * with `body.image_urls: Field required`. The same request placed here returned
+ * the bottle, unchanged, relit into the scene.
+ *
+ * Takes the photograph's URL rather than its bytes, which is what fal wants
+ * anyway. Callers validate that URL first; nothing unvalidated reaches here.
+ */
+const FAL_REST = "https://fal.run";
+const FAL_RESULT_MAX_BYTES = 25 * 1024 * 1024;
+
+export type FalEditRequest = {
+  path: string;
+  prompt: string;
+  imageUrl: string;
+  aspectRatio: "1:1";
+};
+
+function statusError(message: string, status: number): Error {
+  return Object.assign(new Error(message), { status });
+}
+
+export async function falEditImage(
+  request: FalEditRequest,
+  signal?: AbortSignal,
+): Promise<{ bytes: Uint8Array; mediaType: string }> {
+  const response = await fetch(`${FAL_REST}/${request.path}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Key ${apiKey("FAL_KEY")}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      prompt: request.prompt,
+      image_urls: [request.imageUrl],
+      aspect_ratio: request.aspectRatio,
+      num_images: 1,
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    throw statusError(
+      `fal ${request.path} returned HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`,
+      response.status,
+    );
+  }
+
+  const body = (await response.json()) as {
+    images?: { url?: unknown; content_type?: unknown }[];
+  };
+  const image = body.images?.[0];
+  if (typeof image?.url !== "string") {
+    throw statusError(`fal ${request.path} returned no image`, 502);
+  }
+
+  const rendered = await fetch(image.url, { signal });
+  if (!rendered.ok) {
+    throw statusError(
+      `fal result fetch returned HTTP ${rendered.status}`,
+      rendered.status,
+    );
+  }
+  const bytes = new Uint8Array(await rendered.arrayBuffer());
+  if (bytes.byteLength === 0 || bytes.byteLength > FAL_RESULT_MAX_BYTES) {
+    throw statusError(`fal result was ${bytes.byteLength} bytes`, 502);
+  }
+
+  return {
+    bytes,
+    mediaType:
+      typeof image.content_type === "string"
+        ? image.content_type
+        : (rendered.headers.get("content-type") ?? "image/png"),
+  };
 }
 
 export type GatewayImageFailure =

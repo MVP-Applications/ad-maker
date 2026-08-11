@@ -12,7 +12,7 @@ import {
 } from "@/components/icons";
 import { AD_RUN_MAX_SIZE, AD_RUN_MIN_SIZE } from "@/lib/ad-run";
 import { directionByKey } from "@/lib/generate/directions";
-import { imageModelById } from "@/lib/generate/models";
+import { imageModelById, takesProductPhoto } from "@/lib/generate/models";
 import type { AdMakerController, AdSlot } from "@/hooks/use-ad-maker";
 
 type IdleController = Extract<AdMakerController, { phase: "idle" }>;
@@ -333,7 +333,9 @@ function AdCard({
   const modelName = imageModelById(c.model)?.displayName ?? c.model;
   const productName = c.subject.kind === "product" ? c.subject.name : null;
   const sourceImage = c.subject.kind === "product" ? c.subject.imageUrl : null;
-  const usedAsReference = sourceImage !== null && imageModelById(c.model)?.acceptsImage === true;
+  const model = imageModelById(c.model);
+  const usedAsReference =
+    sourceImage !== null && model !== undefined && takesProductPhoto(model);
   const cardTitle = productName ?? directionLabel;
   const subjectLabel = productName ? `Product · ${directionLabel}` : "Company";
   const imageAlt = productName

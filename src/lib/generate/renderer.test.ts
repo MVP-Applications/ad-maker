@@ -71,7 +71,7 @@ describe("Ad Renderer", () => {
     );
     expect(vi.mocked(capable.generateImage).mock.calls[0][0]).toMatchObject({
       model: "openai/gpt-image-2",
-      logo: LOGO,
+      attachment: { kind: "bytes", raster: LOGO },
       square: { kind: "pixel_size", size: "1024x1024" },
       quality: "medium",
     });
@@ -79,18 +79,6 @@ describe("Ad Renderer", () => {
       "The attached image is Stripe's REAL logo mark.",
     );
 
-    for (const model of [
-      "fal/fal-ai/bytedance/seedream/v4.5/text-to-image",
-      "fal/fal-ai/imagen4/preview/ultra",
-    ] as const) {
-      const incapable = dependencies();
-      await createAdRenderer(incapable).render(query({ model }));
-      expect(incapable.loadRaster).not.toHaveBeenCalled();
-      expect(vi.mocked(incapable.generateImage).mock.calls[0][0].logo).toBeNull();
-      expect(vi.mocked(incapable.generateImage).mock.calls[0][0].prompt).not.toContain(
-        "REAL logo mark",
-      );
-    }
   });
 
   it("asks each provider for a square in the dialect it accepts", async () => {
@@ -161,11 +149,64 @@ describe("Ad Renderer", () => {
         undefined,
       );
       const call = vi.mocked(deps.generateImage).mock.calls[0][0];
-      expect(call.logo).toBe(LOGO);
+      expect(call.attachment).toEqual({ kind: "bytes", raster: LOGO });
       expect(call.prompt).toContain("The attached image is the REAL NuPhy Gem80.");
       // The logo would be the wrong reference here — the ad's whole subject is
       // the product, and only one image is sent.
       expect(call.prompt).not.toContain("REAL logo mark");
+    });
+
+    it("routes a fal model's product photo to its editing path, by URL", async () => {
+      // fal's text-to-image endpoints accept an image field and ignore it, so
+      // the photo only counts if it reaches /edit — which takes a URL.
+      const deps = dependencies();
+      await createAdRenderer(deps).render(
+        query({
+          model: "fal/fal-ai/nano-banana-pro",
+          subject: product("https://cdn.example/gem80.png"),
+        }),
+      );
+
+      // Still loaded: that is the check the URL is a public, bounded raster.
+      expect(deps.loadRaster).toHaveBeenCalledWith(
+        "https://cdn.example/gem80.png",
+        undefined,
+      );
+      const call = vi.mocked(deps.generateImage).mock.calls[0][0];
+      expect(call.model).toBe("fal/fal-ai/nano-banana-pro");
+      expect(call.attachment).toEqual({
+        kind: "edit",
+        path: "fal-ai/nano-banana-pro/edit",
+        url: "https://cdn.example/gem80.png",
+      });
+      expect(call.prompt).toContain("The attached image is the REAL");
+    });
+
+    it("never sends the logo to an editing model", async () => {
+      // Editing a logo returns a defaced logo, so a company ad on a fal model
+      // renders from text instead.
+      const deps = dependencies();
+      await createAdRenderer(deps).render(
+        query({ model: "fal/fal-ai/nano-banana-pro", subject: { kind: "company" } }),
+      );
+
+      expect(deps.loadRaster).not.toHaveBeenCalled();
+      const call = vi.mocked(deps.generateImage).mock.calls[0][0];
+      expect(call.attachment).toBeNull();
+      expect(call.prompt).not.toContain("REAL logo mark");
+    });
+
+    it("sends nothing to a model that ignores images", async () => {
+      const deps = dependencies();
+      await createAdRenderer(deps).render(
+        query({
+          model: "fal/fal-ai/imagen4/preview/ultra",
+          subject: product("https://cdn.example/gem80.png"),
+        }),
+      );
+
+      expect(deps.loadRaster).not.toHaveBeenCalled();
+      expect(vi.mocked(deps.generateImage).mock.calls[0][0].attachment).toBeNull();
     });
 
     it("pays for high quality only where a real article has to survive", async () => {
@@ -236,23 +277,6 @@ describe("Ad Renderer", () => {
       );
     });
 
-    it("sends nothing to a model that takes text only", async () => {
-      // The third Product slot: fal has no edit endpoint for Imagen, so its ad
-      // is drawn from the description alone.
-      const deps = dependencies();
-      await createAdRenderer(deps).render(
-        query({
-          model: "fal/fal-ai/imagen4/preview/ultra",
-          subject: product("https://cdn.example/gem80.png"),
-        }),
-      );
-
-      expect(deps.loadRaster).not.toHaveBeenCalled();
-      const call = vi.mocked(deps.generateImage).mock.calls[0][0];
-      expect(call.logo).toBeNull();
-      expect(call.prompt).not.toContain("The attached image");
-    });
-
     it("keeps the ad when the product photo cannot be loaded", async () => {
       const deps = dependencies({ loadRaster: vi.fn(async () => null) });
       const result = await createAdRenderer(deps).render(
@@ -263,7 +287,7 @@ describe("Ad Renderer", () => {
       );
 
       expect(result.ok).toBe(true);
-      expect(vi.mocked(deps.generateImage).mock.calls[0][0].logo).toBeNull();
+      expect(vi.mocked(deps.generateImage).mock.calls[0][0].attachment).toBeNull();
     });
   });
 
@@ -295,7 +319,7 @@ describe("Ad Renderer", () => {
     const result = await createAdRenderer(deps).render(query());
 
     expect(result.ok).toBe(true);
-    expect(vi.mocked(deps.generateImage).mock.calls[0][0].logo).toBeNull();
+    expect(vi.mocked(deps.generateImage).mock.calls[0][0].attachment).toBeNull();
   });
 
   it("downgrades an image-input rejection exactly once without consuming a transient retry", async () => {
@@ -311,10 +335,10 @@ describe("Ad Renderer", () => {
 
     expect(result.ok).toBe(true);
     expect(generateImage).toHaveBeenCalledTimes(4);
-    expect(generateImage.mock.calls[0][0].logo).toBe(LOGO);
-    expect(generateImage.mock.calls[1][0].logo).toBe(LOGO);
-    expect(generateImage.mock.calls[2][0].logo).toBeNull();
-    expect(generateImage.mock.calls[3][0].logo).toBeNull();
+    expect(generateImage.mock.calls[0][0].attachment).toEqual({ kind: "bytes", raster: LOGO });
+    expect(generateImage.mock.calls[1][0].attachment).toEqual({ kind: "bytes", raster: LOGO });
+    expect(generateImage.mock.calls[2][0].attachment).toBeNull();
+    expect(generateImage.mock.calls[3][0].attachment).toBeNull();
     expect(generateImage.mock.calls[2][0].prompt).not.toContain("REAL logo mark");
     expect(vi.mocked(deps.sleep).mock.calls.map(([delay]) => delay)).toEqual([800, 1800]);
   });

@@ -13,68 +13,97 @@ export type ImageModelTier = "primary" | "secondary";
 export type ImageModelSizing = "aspect_ratio" | "pixel_size";
 
 /**
+ * How a model can be shown the one reference image, if at all.
+ *
+ * `native`   — the generation endpoint takes the image itself.
+ * `fal_edit` — the image goes to fal's editing path over REST, because two
+ *              things are true at once: fal's text-to-image endpoints accept an
+ *              image field and then ignore it (a perfume bottle reference came
+ *              back as a leather bag for an invented brand), and the AI SDK
+ *              cannot reach the editing path, sending `image_url` where it
+ *              requires `image_urls`. Direct REST reproduced the bottle exactly.
+ * `none`     — text only.
+ */
+export type ImageReference =
+  | { kind: "native" }
+  | { kind: "fal_edit"; path: string }
+  | { kind: "none" };
+
+/** Can this model be shown a Product's photograph? */
+export function takesProductPhoto(model: ImageModel): boolean {
+  return model.reference.kind !== "none";
+}
+
+/**
+ * Can this model be shown the brand's logo? Only where the image is a reference
+ * for a new picture — an editing endpoint starts from what it is given, so a
+ * logo sent to one returns a defaced logo rather than an advertisement.
+ */
+export function takesLogo(model: ImageModel): boolean {
+  return model.reference.kind === "native";
+}
+
+/**
  * Cross-runtime Image Model catalog. Capabilities live with the model record.
  *
  * The segment before the first slash is the routing provider consumed by
  * `gatewayImageModel`; everything after it is the provider's own model path.
  *
- * `acceptsImage` is what drives tier membership. Only the two OpenAI models
- * take a reference image — the fal entries here are text-to-image endpoints,
- * whose editing variants live behind separate `/edit` paths — and a reference
- * is worth far more on a Product ad, where the real article can be shown, than
- * on a company ad. So the image-capable models sit in the secondary tier, which
- * renders Products. The cost is that company ads no longer receive the logo.
+ * Reference capability drives tier membership: a photograph is worth far more
+ * on a Product ad, where the real article can be shown, than on a company ad.
+ * The three models that can carry one hold the Product slots.
  */
 export const IMAGE_MODELS = [
   {
-    id: "fal/fal-ai/nano-banana-pro",
+    id: "openai/gpt-image-1.5",
     tier: "primary",
-    displayName: "Nano Banana Pro",
-    acceptsImage: false,
-    sizing: "aspect_ratio",
+    displayName: "GPT Image 1.5",
+    reference: { kind: "native" },
+    sizing: "pixel_size",
   },
   {
     id: "fal/xai/grok-imagine-image",
     tier: "primary",
     displayName: "Grok Imagine",
-    acceptsImage: false,
+    reference: { kind: "none" },
     sizing: "aspect_ratio",
   },
   {
-    id: "fal/fal-ai/bytedance/seedream/v4.5/text-to-image",
+    id: "fal/fal-ai/imagen4/preview/ultra",
     tier: "primary",
-    displayName: "Seedream 4.5",
-    acceptsImage: false,
+    displayName: "Imagen 4 Ultra",
+    reference: { kind: "none" },
     sizing: "aspect_ratio",
   },
   {
     id: "openai/gpt-image-2",
     tier: "secondary",
     displayName: "GPT Image 2",
-    acceptsImage: true,
+    reference: { kind: "native" },
     sizing: "pixel_size",
   },
   {
-    id: "openai/gpt-image-1.5",
+    id: "fal/fal-ai/nano-banana-pro",
     tier: "secondary",
-    displayName: "GPT Image 1.5",
-    acceptsImage: true,
-    sizing: "pixel_size",
+    displayName: "Nano Banana Pro",
+    reference: { kind: "fal_edit", path: "fal-ai/nano-banana-pro/edit" },
+    sizing: "aspect_ratio",
   },
   {
-    // Third Product slot: fal has no edit endpoint for Imagen, so this one
-    // stays text-only and its Product ad is drawn from the description alone.
-    id: "fal/fal-ai/imagen4/preview/ultra",
+    id: "fal/fal-ai/bytedance/seedream/v4.5/text-to-image",
     tier: "secondary",
-    displayName: "Imagen 4 Ultra",
-    acceptsImage: false,
+    displayName: "Seedream 4.5",
+    reference: {
+      kind: "fal_edit",
+      path: "fal-ai/bytedance/seedream/v4.5/edit",
+    },
     sizing: "aspect_ratio",
   },
 ] as const satisfies readonly {
   id: string;
   tier: ImageModelTier;
   displayName: string;
-  acceptsImage: boolean;
+  reference: ImageReference;
   sizing: ImageModelSizing;
 }[];
 

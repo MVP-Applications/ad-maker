@@ -21,6 +21,7 @@ import {
 import {
   assignImageModels,
   imageModelById,
+  takesProductPhoto,
   type ImageModelId,
 } from "./models";
 
@@ -138,8 +139,12 @@ function pairModelsToPhotos(
   slotModels: readonly ImageModelId[],
   products: readonly Product[],
 ): ImageModelId[] {
-  const capable = slotModels.filter((id) => imageModelById(id)?.acceptsImage);
-  const rest = slotModels.filter((id) => !imageModelById(id)?.acceptsImage);
+  const takes = (id: ImageModelId) => {
+    const model = imageModelById(id);
+    return model ? takesProductPhoto(model) : false;
+  };
+  const capable = slotModels.filter(takes);
+  const rest = slotModels.filter((id) => !takes(id));
   return products.map((product) =>
     (product.imageUrl && capable.length ? capable : rest).shift() ??
     capable.shift() ??
@@ -165,7 +170,10 @@ function preferPhotoSafeDirections(
   const needsPhotoSafe = (concept: PlannedConcept) =>
     concept.subject.kind === "product" &&
     concept.subject.imageUrl !== null &&
-    imageModelById(concept.model)?.acceptsImage === true;
+    (() => {
+      const model = imageModelById(concept.model);
+      return model ? takesProductPhoto(model) : false;
+    })();
 
   for (const concept of result) {
     if (!needsPhotoSafe(concept) || isPhotoSafe(concept.key)) continue;

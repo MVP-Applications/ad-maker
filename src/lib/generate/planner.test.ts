@@ -32,7 +32,7 @@ const PRODUCTS: Product[] = [
 const CONCEPTS: readonly PlannedConcept[] = [
   {
     key: "product_hero",
-    model: "fal/fal-ai/nano-banana-pro",
+    model: "openai/gpt-image-1.5",
     subject: { kind: "company" },
     headline: "Move Faster",
     subheadline: "Payments built for internet businesses",
@@ -46,7 +46,7 @@ const CONCEPTS: readonly PlannedConcept[] = [
   },
   {
     key: "typographic",
-    model: "fal/fal-ai/bytedance/seedream/v4.5/text-to-image",
+    model: "fal/fal-ai/imagen4/preview/ultra",
     subject: { kind: "company" },
     headline: "Own Tomorrow",
     subheadline: "Tools that make online commerce simple",
@@ -60,14 +60,14 @@ const CONCEPTS: readonly PlannedConcept[] = [
   },
   {
     key: "gradient_field",
-    model: "openai/gpt-image-1.5",
+    model: "fal/fal-ai/nano-banana-pro",
     subject: { kind: "product", ...PRODUCTS[1] },
     headline: "Billing That Grows",
     subheadline: "Subscriptions and invoices built to scale",
   },
   {
     key: "editorial_spread",
-    model: "fal/fal-ai/imagen4/preview/ultra",
+    model: "fal/fal-ai/bytedance/seedream/v4.5/text-to-image",
     subject: { kind: "product", ...PRODUCTS[2] },
     headline: "Checkout, Simplified",
     subheadline: "A prebuilt payment form customers recognize",
