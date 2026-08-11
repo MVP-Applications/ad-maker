@@ -3,6 +3,7 @@ import {
   type BrandColor,
 } from "@/lib/brand-color";
 import {
+  AD_CATALOG_MAX,
   AD_COMPANY_CONCEPT_COUNT,
   AD_PRIMARY_MODEL_COUNT,
   AD_PRODUCT_CONCEPT_MAX,
@@ -25,6 +26,7 @@ import { normalizeDomain } from "@/lib/net";
 import { parsePublicHttpUrl } from "@/lib/public-url";
 
 export {
+  AD_CATALOG_MAX,
   AD_COMPANY_CONCEPT_COUNT,
   AD_PRIMARY_MODEL_COUNT,
   AD_PRODUCT_CONCEPT_MAX,
@@ -73,6 +75,16 @@ export type PlannedConcept = {
   subheadline: string;
 };
 
+/**
+ * What one domain yields before anyone has chosen anything: the brand, and the
+ * whole catalog worth advertising. An Ad Run draws its Products from here, so
+ * this is also the list a person picks from.
+ */
+export type AdRunBrief = {
+  brief: AdBrief;
+  products: readonly Product[];
+};
+
 export type AdRunPlan = {
   brief: AdBrief;
   concepts: readonly PlannedConcept[];
@@ -100,7 +112,7 @@ type RecordValue = Record<string, unknown>;
 
 const DIRECTIONS = new Set<string>(CREATIVE_DIRECTION_KEYS);
 const MODELS = new Set<string>(IMAGE_MODEL_IDS);
-const BRIEF_FORMAT_VERSION = "3";
+const BRIEF_FORMAT_VERSION = "4";
 
 function invalid(message: string): never {
   throw new Error(`Invalid Ad Run contract: ${message}`);
@@ -246,6 +258,32 @@ function imageModel(value: unknown): ImageModelId {
   return model as ImageModelId;
 }
 
+/** The Product fields alone, shared by a catalog entry and a Concept subject. */
+function decodeProductFields(value: RecordValue, name: string): Product {
+  return {
+    name: text(value.name, `${name}.name`, {
+      min: 1,
+      max: AD_RUN_LIMITS.productName,
+      trim: true,
+    }),
+    description: text(value.description, `${name}.description`, {
+      min: 1,
+      max: AD_RUN_LIMITS.productDescription,
+      trim: true,
+    }),
+    imageUrl:
+      value.imageUrl === null || value.imageUrl === undefined
+        ? null
+        : publicHttpUrl(value.imageUrl, `${name}.imageUrl`),
+  };
+}
+
+function decodeProduct(value: unknown, name: string): Product {
+  const product = record(value, name);
+  onlyKeys(product, ["name", "description", "imageUrl"], name);
+  return decodeProductFields(product, name);
+}
+
 function decodeSubject(value: unknown, name = "concept.subject"): ConceptSubject {
   const subject = record(value, name);
   const kind = text(subject.kind, `${name}.kind`, { min: 1, max: 16, trim: true });
@@ -257,23 +295,7 @@ function decodeSubject(value: unknown, name = "concept.subject"): ConceptSubject
   if (kind !== "product") invalid(`${name}.kind is unknown`);
 
   onlyKeys(subject, ["kind", "name", "description", "imageUrl"], name);
-  return {
-    kind,
-    name: text(subject.name, `${name}.name`, {
-      min: 1,
-      max: AD_RUN_LIMITS.productName,
-      trim: true,
-    }),
-    description: text(subject.description, `${name}.description`, {
-      min: 1,
-      max: AD_RUN_LIMITS.productDescription,
-      trim: true,
-    }),
-    imageUrl:
-      subject.imageUrl === null || subject.imageUrl === undefined
-        ? null
-        : publicHttpUrl(subject.imageUrl, `${name}.imageUrl`),
-  };
+  return { kind, ...decodeProductFields(subject, name) };
 }
 
 function decodeConcept(value: unknown): PlannedConcept {
@@ -306,6 +328,38 @@ function decodeConcept(value: unknown): PlannedConcept {
     headline,
     subheadline,
   };
+}
+
+/**
+ * Decode the Brief served before any choice is made.
+ *
+ * The catalog is bounded and its Products distinct, but nothing here asserts
+ * how many of them an Ad Run will use — that is the choice this Brief exists to
+ * offer, and it is checked when the Concepts come back.
+ */
+export function decodeAdRunBrief(value: unknown): AdRunBrief {
+  const payload = record(value, "Brief");
+  onlyKeys(payload, ["brief", "products"], "Brief");
+
+  if (
+    !Array.isArray(payload.products) ||
+    payload.products.length < AD_PRODUCT_CONCEPT_MIN ||
+    payload.products.length > AD_CATALOG_MAX
+  ) {
+    invalid(
+      `a Brief must carry between ${AD_PRODUCT_CONCEPT_MIN} and ${AD_CATALOG_MAX} Products`,
+    );
+  }
+
+  const products = payload.products.map((product, index) =>
+    decodeProduct(product, `products[${index}]`),
+  );
+  const names = products.map(({ name }) => name.toLocaleLowerCase());
+  if (new Set(names).size !== names.length) {
+    invalid("a Brief must carry distinct Products");
+  }
+
+  return { brief: decodeBrief(payload.brief), products };
 }
 
 export function decodeAdRunPlan(value: unknown): AdRunPlan {

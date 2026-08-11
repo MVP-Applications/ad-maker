@@ -2,7 +2,7 @@
 
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AdRunPlan, PlannedConcept } from "@/lib/ad-run";
+import type { AdRunBrief, AdRunPlan, PlannedConcept } from "@/lib/ad-run";
 import { CREATIVE_DIRECTIONS } from "@/lib/generate/directions";
 import { IMAGE_MODELS } from "@/lib/generate/models";
 import { useAdMaker, type AdMakerController } from "./use-ad-maker";
@@ -81,12 +81,40 @@ function planFor(
   };
 }
 
+/** The Brief that precedes a plan: same brand, and the Products it advertises. */
+function briefFor(plan: AdRunPlan): AdRunBrief {
+  return {
+    brief: plan.brief,
+    products: plan.concepts.flatMap(({ subject }) =>
+      subject.kind === "product"
+        ? [
+            {
+              name: subject.name,
+              description: subject.description,
+              imageUrl: subject.imageUrl,
+            },
+          ]
+        : [],
+    ),
+  };
+}
+
 function jsonResponse(value: unknown, ok = true): Response {
   return {
     ok,
     status: ok ? 200 : 502,
     json: async () => value,
   } as Response;
+}
+
+/**
+ * The two planning calls that now precede every Rendered Ad. Returns null for
+ * an ad request so each test can keep its own render behavior.
+ */
+function planningResponse(plan: AdRunPlan, href: string): Response | null {
+  if (href.startsWith("/api/brief")) return jsonResponse(briefFor(plan));
+  if (href.startsWith("/api/concepts")) return jsonResponse(plan);
+  return null;
 }
 
 function imageResponse(type = "image/png", ok = true): Response {
@@ -136,11 +164,8 @@ describe("useAdMaker", () => {
   it("canonicalizes a mixed-case submitted domain before planning", async () => {
     const pendingAd = deferred<Response>();
     fetchMock.mockImplementation((input) => {
-      const href = String(input);
-      if (href.startsWith("/api/brief")) {
-        return Promise.resolve(jsonResponse(planFor()));
-      }
-      return pendingAd.promise;
+      const planning = planningResponse(planFor(), String(input));
+      return planning ? Promise.resolve(planning) : pendingAd.promise;
     });
     const { result, unmount } = renderHook(() => useAdMaker());
     const start = atPhase(result.current, "idle").start;
@@ -148,16 +173,17 @@ describe("useAdMaker", () => {
     await act(() => start("HTTPS://WWW.Stripe.COM/Pricing"));
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "/api/brief?domain=stripe.com&v=3",
+      "/api/brief?domain=stripe.com&v=4",
     );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/concepts");
     const generating = atPhase(result.current, "generating");
     expect(generating.submittedDomain).toBe("stripe.com");
     expect(generating.brief.domain).toBe("stripe.com");
     unmount();
   });
 
-  it("rejects a valid plan for a domain other than the submitted domain", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(planFor("linear.app")));
+  it("rejects a valid Brief for a domain other than the submitted domain", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(briefFor(planFor("linear.app"))));
     const { result } = renderHook(() => useAdMaker());
     const start = atPhase(result.current, "idle").start;
 
@@ -170,6 +196,27 @@ describe("useAdMaker", () => {
     expect(atPhase(result.current, "idle").domain).toBe("stripe.com");
   });
 
+  // The Brief and the Ad Run planned from it are two answers now, and both are
+  // checked: a plan that comes back for another brand never reaches a slot.
+  it("rejects a planned Ad Run for a domain other than the submitted domain", async () => {
+    fetchMock.mockImplementation((input) =>
+      Promise.resolve(
+        String(input).startsWith("/api/brief")
+          ? jsonResponse(briefFor(planFor()))
+          : jsonResponse(planFor("linear.app")),
+      ),
+    );
+    const { result } = renderHook(() => useAdMaker());
+    const start = atPhase(result.current, "idle").start;
+
+    await act(() => start("stripe.com"));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(atPhase(result.current, "idle").error).toBe(
+      "The Ad Run did not match the submitted domain.",
+    );
+  });
+
   it("stays generating when the original requests settle before an in-flight retry", async () => {
     const plan = planFor();
     const total = plan.concepts.length;
@@ -177,10 +224,8 @@ describe("useAdMaker", () => {
     const retry = deferred<Response>();
     let adRequest = 0;
     fetchMock.mockImplementation((input) => {
-      const href = String(input);
-      if (href.startsWith("/api/brief")) {
-        return Promise.resolve(jsonResponse(plan));
-      }
+      const planning = planningResponse(plan, String(input));
+      if (planning) return Promise.resolve(planning);
       adRequest += 1;
       if (adRequest === 1)
         return Promise.resolve(imageResponse("image/png", false));
@@ -222,17 +267,17 @@ describe("useAdMaker", () => {
 
   it("aborts and ignores stale Rendered Ads after reset", async () => {
     const pendingAd = deferred<Response>();
-    fetchMock.mockImplementation((input) =>
-      String(input).startsWith("/api/brief")
-        ? Promise.resolve(jsonResponse(planFor()))
-        : pendingAd.promise,
-    );
+    fetchMock.mockImplementation((input) => {
+      const planning = planningResponse(planFor(), String(input));
+      return planning ? Promise.resolve(planning) : pendingAd.promise;
+    });
     const { result } = renderHook(() => useAdMaker());
     const start = atPhase(result.current, "idle").start;
 
     await act(() => start("stripe.com"));
     const generating = atPhase(result.current, "generating");
-    const rootSignal = (fetchMock.mock.calls[1]?.[1] as RequestInit).signal;
+    // Calls 0 and 1 are the Brief and the Concepts; the first ad follows them.
+    const rootSignal = (fetchMock.mock.calls[2]?.[1] as RequestInit).signal;
 
     act(() => generating.reset());
     expect(rootSignal?.aborted).toBe(true);
@@ -254,10 +299,8 @@ describe("useAdMaker", () => {
     const retry = deferred<Response>();
     let adRequest = 0;
     fetchMock.mockImplementation((input) => {
-      const href = String(input);
-      if (href.startsWith("/api/brief")) {
-        return Promise.resolve(jsonResponse(plan));
-      }
+      const planning = planningResponse(plan, String(input));
+      if (planning) return Promise.resolve(planning);
       adRequest += 1;
       if (adRequest === 1) {
         return Promise.resolve(imageResponse("image/png", false));
@@ -287,9 +330,9 @@ describe("useAdMaker", () => {
       const plan = planFor("stripe.com", productCount);
       const total = plan.concepts.length;
       fetchMock.mockImplementation((input) =>
-        String(input).startsWith("/api/brief")
-          ? Promise.resolve(jsonResponse(plan))
-          : Promise.resolve(imageResponse()),
+        Promise.resolve(
+          planningResponse(plan, String(input)) ?? imageResponse(),
+        ),
       );
       const { result, unmount } = renderHook(() => useAdMaker());
       const start = atPhase(result.current, "idle").start;
@@ -309,7 +352,8 @@ describe("useAdMaker", () => {
       expect(
         completed.slots.slice(3).map(({ concept }) => concept.subject.kind),
       ).toEqual(Array.from({ length: productCount }, () => "product"));
-      expect(fetchMock).toHaveBeenCalledTimes(total + 1);
+      // One Brief, one Concepts call, then one request per Rendered Ad.
+      expect(fetchMock).toHaveBeenCalledTimes(total + 2);
       expect(createObjectURL).toHaveBeenCalledTimes(total);
 
       unmount();

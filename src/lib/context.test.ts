@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AD_CATALOG_MAX } from "./ad-run-policy";
 import { BrandExtractorError, researchBrand } from "./context";
 
 const originalEndpoint = process.env.BRAND_EXTRACTOR_URL;
@@ -220,6 +221,21 @@ describe("researchBrand", () => {
     expect(research.styleguide).toEqual({ mood: "", colors: [], fontFamily: null });
     expect(research.summary).toBe("");
     expect(research.products).toHaveLength(1);
+  });
+
+  // The catalog is what a person chooses a Product from, so it is carried past
+  // the three slots an Ad Run has and cut only at the contract's own ceiling.
+  it("carries the whole catalog up to the shared maximum", async () => {
+    const flagships = Array.from({ length: AD_CATALOG_MAX + 4 }, (_, index) => ({
+      name: `Product ${index + 1}`,
+      description: `What product number ${index + 1} does for a customer.`,
+    }));
+    vi.stubGlobal("fetch", respond({ ok: true, flagships }));
+
+    const research = await researchBrand("nuphy.com");
+
+    expect(research.products).toHaveLength(AD_CATALOG_MAX);
+    expect(research.products[3].name).toBe("Product 4");
   });
 
   it("reports a site it could not read separately from a service that is down", async () => {

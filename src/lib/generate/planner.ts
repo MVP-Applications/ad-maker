@@ -1,7 +1,10 @@
 import {
+  AD_PRODUCT_CONCEPT_MAX,
   AD_RUN_LIMITS,
+  decodeAdRunBrief,
   decodeAdRunPlan,
   type AdBrief,
+  type AdRunBrief,
   type AdRunPlan,
   type PlannedConcept,
   type Product,
@@ -40,6 +43,10 @@ export type AdRunPlanningResult =
   | { ok: true; value: AdRunPlan }
   | { ok: false; error: AdRunPlanningFailure };
 
+export type AdRunBriefResult =
+  | { ok: true; value: AdRunBrief }
+  | { ok: false; error: AdRunPlanningFailure };
+
 /**
  * Behavior-level adapters used by the Ad Run planning module. The research
  * service and environment-variable names stay behind this seam.
@@ -63,8 +70,13 @@ export type AdRunPlannerAdapters = {
   concepts: ConceptPlanningAdapter;
 };
 
-export type AdRunPlanner = (
+export type AdRunBriefResearcher = (
   rawDomain: string,
+  signal?: AbortSignal,
+) => Promise<AdRunBriefResult>;
+
+export type AdRunConceptPlanner = (
+  input: AdRunBrief,
   signal?: AbortSignal,
 ) => Promise<AdRunPlanningResult>;
 
@@ -138,11 +150,15 @@ function buildBrief(
 }
 
 /**
- * Domain -> Brief -> three Company concepts plus one to three Product concepts.
- * The returned function is the whole test surface; partial-failure policy and
- * contract validation stay local.
+ * Domain -> Brief plus the catalog to choose from. No concept is planned here:
+ * planning follows a choice, and the choice needs this answer first.
+ *
+ * Generation readiness is still checked alongside research, because a Brief
+ * nobody can turn into ads is not worth the extract that produced it.
  */
-export function createAdRunPlanner(adapters: AdRunPlannerAdapters): AdRunPlanner {
+export function createBriefResearcher(
+  adapters: AdRunPlannerAdapters,
+): AdRunBriefResearcher {
   return async (rawDomain, signal) => {
     const domain = normalizeDomain(rawDomain);
     if (!domain) return { ok: false, error: { code: "invalid-domain" } };
@@ -173,9 +189,41 @@ export function createAdRunPlanner(adapters: AdRunPlannerAdapters): AdRunPlanner
         research.summary,
         research.styleguide,
       );
+
+      return {
+        ok: true,
+        value: decodeAdRunBrief({ brief, products: research.products }),
+      };
+    } catch (cause) {
+      if (signal?.aborted) return { ok: false, error: { code: "aborted" } };
+      return { ok: false, error: { code: "internal", cause } };
+    }
+  };
+}
+
+/**
+ * Brief -> three Company concepts plus one to three Product concepts.
+ *
+ * The catalog can now be longer than an Ad Run, so the Products it advertises
+ * are taken from the front of the list — the shop's own order, which is how the
+ * extractor ranks them. A person's choice replaces that cut later; until then
+ * this reproduces exactly what the single planning call used to do.
+ */
+export function createConceptPlanner(
+  adapters: Pick<AdRunPlannerAdapters, "concepts">,
+): AdRunConceptPlanner {
+  return async (input, signal) => {
+    if (signal?.aborted) return { ok: false, error: { code: "aborted" } };
+
+    try {
+      if (!adapters.concepts.isReady()) {
+        return { ok: false, error: { code: "not-configured" } };
+      }
+
+      const { brief, products } = decodeAdRunBrief(input);
       const concepts = await adapters.concepts.planConcepts(
         brief,
-        research.products,
+        products.slice(0, AD_PRODUCT_CONCEPT_MAX),
         signal,
       );
       if (signal?.aborted) return { ok: false, error: { code: "aborted" } };
@@ -191,7 +239,7 @@ export function createAdRunPlanner(adapters: AdRunPlannerAdapters): AdRunPlanner
   };
 }
 
-const productionPlanner = createAdRunPlanner({
+const productionAdapters: AdRunPlannerAdapters = {
   research: {
     isReady: hasContextConfiguration,
     research: researchBrand,
@@ -206,8 +254,15 @@ const productionPlanner = createAdRunPlanner({
         signal,
       ),
   },
-});
+};
+
+const productionResearcher = createBriefResearcher(productionAdapters);
+const productionPlanner = createConceptPlanner(productionAdapters);
 
 /** Production adapter used by the Brief HTTP route. */
-export const planAdRun: AdRunPlanner = (rawDomain, signal) =>
-  productionPlanner(rawDomain, signal);
+export const researchAdRunBrief: AdRunBriefResearcher = (rawDomain, signal) =>
+  productionResearcher(rawDomain, signal);
+
+/** Production adapter used by the Concepts HTTP route. */
+export const planAdRunConcepts: AdRunConceptPlanner = (input, signal) =>
+  productionPlanner(input, signal);

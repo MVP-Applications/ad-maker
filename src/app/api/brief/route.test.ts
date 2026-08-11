@@ -1,18 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ planAdRun: vi.fn() }));
+const mocks = vi.hoisted(() => ({ researchAdRunBrief: vi.fn() }));
 
 vi.mock("@/lib/generate/planner", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/generate/planner")>();
-  return { ...original, planAdRun: mocks.planAdRun };
+  return { ...original, researchAdRunBrief: mocks.researchAdRunBrief };
 });
 
-import type { AdRunPlan } from "@/lib/ad-run";
-import { CREATIVE_DIRECTIONS } from "@/lib/generate/directions";
-import { IMAGE_MODELS } from "@/lib/generate/models";
+import type { AdRunBrief } from "@/lib/ad-run";
 import { GET } from "./route";
 
-const plan: AdRunPlan = {
+const adRunBrief: AdRunBrief = {
   brief: {
     domain: "stripe.com",
     brandName: "Stripe",
@@ -26,24 +24,21 @@ const plan: AdRunPlan = {
     logoUrl: null,
     colors: [{ hex: "#635bff", name: "Purple" }],
   },
-  concepts: [0, 1, 2, 3].map((index) => ({
-    key: CREATIVE_DIRECTIONS[index].key,
-    model: IMAGE_MODELS[index].id,
-    subject:
-      index < 3
-        ? { kind: "company" as const }
-        : {
-            kind: "product" as const,
-            name: "Payments",
-            description: "Accept payments online and in person.",
-            imageUrl: null,
-          },
-    headline: `Concept ${index + 1}`,
-    subheadline: "A concise supporting line",
-  })),
+  products: [
+    {
+      name: "Payments",
+      description: "Accept payments online and in person.",
+      imageUrl: null,
+    },
+    {
+      name: "Billing",
+      description: "Manage subscriptions and recurring revenue.",
+      imageUrl: null,
+    },
+  ],
 };
 
-const request = (domain = "stripe.com", version: string | null = "3") => {
+const request = (domain = "stripe.com", version: string | null = "4") => {
   const params = new URLSearchParams({ domain });
   if (version !== null) params.set("v", version);
   return new Request(`https://branda.test/api/brief?${params.toString()}`);
@@ -51,57 +46,68 @@ const request = (domain = "stripe.com", version: string | null = "3") => {
 
 describe("GET /api/brief", () => {
   beforeEach(() => {
-    mocks.planAdRun.mockReset();
+    mocks.researchAdRunBrief.mockReset();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
   });
 
-  it("returns the validated Ad Run with canonical cache headers", async () => {
-    mocks.planAdRun.mockResolvedValue({ ok: true, value: plan });
+  it("returns the validated Brief with canonical cache headers", async () => {
+    mocks.researchAdRunBrief.mockResolvedValue({ ok: true, value: adRunBrief });
 
     const response = await GET(request());
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual(plan);
+    await expect(response.json()).resolves.toEqual(adRunBrief);
     expect(response.headers.get("cache-control")).toBe(
       "public, s-maxage=3600, stale-while-revalidate=86400",
     );
     expect(response.headers.get("cdn-cache-control")).toBe(
       "public, s-maxage=3600, stale-while-revalidate=86400",
     );
-    expect(mocks.planAdRun).toHaveBeenCalledWith(
+    expect(mocks.researchAdRunBrief).toHaveBeenCalledWith(
       "stripe.com",
       expect.any(AbortSignal),
     );
   });
 
+  // Concepts follow a choice made against this Brief, so the route that serves
+  // it must not plan any.
+  it("serves the catalog without planning concepts", async () => {
+    mocks.researchAdRunBrief.mockResolvedValue({ ok: true, value: adRunBrief });
+
+    const body = await (await GET(request())).json();
+
+    expect(body).not.toHaveProperty("concepts");
+    expect(body.products).toHaveLength(2);
+  });
+
   it.each([
     ["an unversioned request", "stripe.com", null],
-    ["an old format version", "stripe.com", "2"],
-    ["an equivalent domain", "HTTPS://WWW.Stripe.com/pricing", "3"],
+    ["an old format version", "stripe.com", "3"],
+    ["an equivalent domain", "HTTPS://WWW.Stripe.com/pricing", "4"],
   ] as const)(
-    "redirects %s to the versioned canonical cache key before planning",
+    "redirects %s to the versioned canonical cache key before researching",
     async (_label, domain, version) => {
       const response = await GET(request(domain, version));
 
       expect(response.status).toBe(308);
       expect(response.headers.get("location")).toBe(
-        "https://branda.test/api/brief?domain=stripe.com&v=3",
+        "https://branda.test/api/brief?domain=stripe.com&v=4",
       );
       expect(response.headers.get("cache-control")).toBe("no-store");
-      expect(mocks.planAdRun).not.toHaveBeenCalled();
+      expect(mocks.researchAdRunBrief).not.toHaveBeenCalled();
     },
   );
 
   it.each([
     "/api/brief?domain=stripe.com&domain=linear.app",
-    "/api/brief?domain=stripe.com&v=3&v=3",
+    "/api/brief?domain=stripe.com&v=4&v=4",
     "/api/brief?domain=stripe.com&extra=true",
   ])("rejects ambiguous query %s", async (path) => {
     const response = await GET(new Request(new URL(path, "https://branda.test")));
 
     expect(response.status).toBe(400);
     expect(response.headers.get("cdn-cache-control")).toBe("no-store");
-    expect(mocks.planAdRun).not.toHaveBeenCalled();
+    expect(mocks.researchAdRunBrief).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -120,7 +126,7 @@ describe("GET /api/brief", () => {
       code === "products-unavailable"
         ? { code, cause: new Error("private deployment detail") }
         : { code };
-    mocks.planAdRun.mockResolvedValue({ ok: false, error });
+    mocks.researchAdRunBrief.mockResolvedValue({ ok: false, error });
 
     const response = await GET(request());
     const body = await response.text();

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { PlannedConcept, Product } from "@/lib/ad-run";
+import type { AdBrief, AdRunBrief, PlannedConcept, Product } from "@/lib/ad-run";
 import {
   BrandExtractorError,
   type BrandProfile,
@@ -7,7 +7,8 @@ import {
   type StyleguideProfile,
 } from "@/lib/context";
 import {
-  createAdRunPlanner,
+  createBriefResearcher,
+  createConceptPlanner,
   type AdRunPlannerAdapters,
 } from "./planner";
 
@@ -99,6 +100,26 @@ const RESEARCH: BrandResearch = {
   products: PRODUCTS,
 };
 
+/** The Brief the researcher builds from RESEARCH, stated rather than derived. */
+const BRIEF: AdBrief = {
+  domain: "stripe.com",
+  brandName: "Stripe",
+  description: "Financial infrastructure for the internet.",
+  industry: "Technology · Payments",
+  summary: "Stripe helps businesses accept online payments around the world.",
+  mood: "bold, precise, optimistic",
+  fontFamily: "Inter",
+  colorA: "rich indigo",
+  colorB: "deep navy",
+  logoUrl: "https://cdn.stripe.com/logo.png",
+  colors: [
+    { hex: "#635bff", name: "Blurple" },
+    { hex: "#0a2540", name: "Navy" },
+  ],
+};
+
+const AD_RUN_BRIEF: AdRunBrief = { brief: BRIEF, products: PRODUCTS };
+
 /** One research call now carries what four used to, so overrides patch it. */
 const researching = (overrides: Partial<BrandResearch> = {}) =>
   vi.fn(async () => ({ ...RESEARCH, ...overrides }));
@@ -131,10 +152,10 @@ function adapters(overrides: Partial<FlatTestAdapters> = {}) {
   } satisfies AdRunPlannerAdapters & FlatTestAdapters;
 }
 
-describe("createAdRunPlanner", () => {
-  it("normalizes the domain and returns a contract-validated Ad Run", async () => {
+describe("createBriefResearcher", () => {
+  it("normalizes the domain and returns a contract-validated Brief", async () => {
     const deps = adapters();
-    const result = await createAdRunPlanner(deps)(
+    const result = await createBriefResearcher(deps)(
       "https://www.Stripe.com/pricing",
     );
 
@@ -150,24 +171,19 @@ describe("createAdRunPlanner", () => {
       colorB: "deep navy",
     });
     expect(result.value.brief.summary).toContain("accept online payments");
-    expect(result.value.concepts).toEqual(CONCEPTS);
+    expect(result.value.products).toEqual(PRODUCTS);
     expect(deps.doResearch).toHaveBeenCalledWith("stripe.com", undefined);
-    expect(result.value.concepts.slice(0, 3).map(({ subject }) => subject)).toEqual([
-      { kind: "company" },
-      { kind: "company" },
-      { kind: "company" },
-    ]);
-    expect(result.value.concepts.slice(3).map(({ subject }) => subject)).toEqual(
-      PRODUCTS.map((product) => ({ kind: "product", ...product })),
-    );
-    expect(deps.planConcepts).toHaveBeenCalledWith(
-      result.value.brief,
-      PRODUCTS,
-      undefined,
-    );
   });
 
-  it("bounds the flat Brief before passing it to concept planning", async () => {
+  // Planning follows a choice made against the Brief, so it cannot run here.
+  it("never plans concepts", async () => {
+    const deps = adapters();
+    await createBriefResearcher(deps)("stripe.com");
+
+    expect(deps.planConcepts).not.toHaveBeenCalled();
+  });
+
+  it("bounds the flat Brief before serving it", async () => {
     const deps = adapters({
       doResearch: researching({
         brand: {
@@ -188,7 +204,7 @@ describe("createAdRunPlanner", () => {
       }),
     });
 
-    const result = await createAdRunPlanner(deps)("stripe.com");
+    const result = await createBriefResearcher(deps)("stripe.com");
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -202,15 +218,14 @@ describe("createAdRunPlanner", () => {
     expect(result.value.brief.colors[0].name).toHaveLength(80);
   });
 
-  it("plans on an empty summary when the extract carries no page copy", async () => {
+  it("serves an empty summary when the extract carries no page copy", async () => {
     const deps = adapters({ doResearch: researching({ summary: "" }) });
 
-    const result = await createAdRunPlanner(deps)("stripe.com");
+    const result = await createBriefResearcher(deps)("stripe.com");
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.brief.summary).toBe("");
-    expect(deps.planConcepts).toHaveBeenCalledOnce();
   });
 
   it("uses palette and typography defaults when the extract states no styleguide", async () => {
@@ -220,7 +235,7 @@ describe("createAdRunPlanner", () => {
       }),
     });
 
-    const result = await createAdRunPlanner(deps)("stripe.com");
+    const result = await createBriefResearcher(deps)("stripe.com");
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -232,7 +247,7 @@ describe("createAdRunPlanner", () => {
   });
 
   it("uses the default mood when enrichment returns an empty value", async () => {
-    const result = await createAdRunPlanner(
+    const result = await createBriefResearcher(
       adapters({
         doResearch: researching({ styleguide: { ...STYLEGUIDE, mood: "   " } }),
       }),
@@ -241,6 +256,23 @@ describe("createAdRunPlanner", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.brief.mood).toBe("modern, confident, premium");
+  });
+
+  // The catalog is what a person chooses from, so it is carried whole rather
+  // than cut to the number of Product slots an Ad Run happens to have.
+  it("carries a catalog longer than one Ad Run can advertise", async () => {
+    const catalog = Array.from({ length: 8 }, (_, index) => ({
+      name: `Product ${index + 1}`,
+      description: `Description for product number ${index + 1}.`,
+      imageUrl: null,
+    }));
+    const deps = adapters({ doResearch: researching({ products: catalog }) });
+
+    const result = await createBriefResearcher(deps)("stripe.com");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.products).toEqual(catalog);
   });
 
   // The research service reports why it could not answer, and each reason
@@ -259,10 +291,9 @@ describe("createAdRunPlanner", () => {
       }),
     });
 
-    const result = await createAdRunPlanner(deps)("stripe.com");
+    const result = await createBriefResearcher(deps)("stripe.com");
 
     expect(result).toMatchObject({ ok: false, error: { code } });
-    expect(deps.planConcepts).not.toHaveBeenCalled();
   });
 
   it("treats an unrecognized research failure as internal", async () => {
@@ -273,7 +304,7 @@ describe("createAdRunPlanner", () => {
       }),
     });
 
-    expect(await createAdRunPlanner(deps)("stripe.com")).toEqual({
+    expect(await createBriefResearcher(deps)("stripe.com")).toEqual({
       ok: false,
       error: { code: "internal", cause: failure },
     });
@@ -281,7 +312,7 @@ describe("createAdRunPlanner", () => {
 
   it("returns invalid-domain without checking readiness or doing I/O", async () => {
     const deps = adapters();
-    const result = await createAdRunPlanner(deps)("localhost");
+    const result = await createBriefResearcher(deps)("localhost");
 
     expect(result).toEqual({ ok: false, error: { code: "invalid-domain" } });
     expect(deps.hasContextConfiguration).not.toHaveBeenCalled();
@@ -289,6 +320,8 @@ describe("createAdRunPlanner", () => {
     expect(deps.doResearch).not.toHaveBeenCalled();
   });
 
+  // A Brief nobody can turn into ads is not worth the extract that produced it,
+  // so generation readiness is still checked before any research runs.
   it.each([
     [false, true],
     [true, false],
@@ -301,17 +334,16 @@ describe("createAdRunPlanner", () => {
         hasGenerationConfiguration: vi.fn(() => generationReady),
       });
 
-      const result = await createAdRunPlanner(deps)("stripe.com");
+      const result = await createBriefResearcher(deps)("stripe.com");
 
       expect(result).toEqual({ ok: false, error: { code: "not-configured" } });
       expect(deps.hasContextConfiguration).toHaveBeenCalledOnce();
       expect(deps.hasGenerationConfiguration).toHaveBeenCalledOnce();
       expect(deps.doResearch).not.toHaveBeenCalled();
-      expect(deps.planConcepts).not.toHaveBeenCalled();
     },
   );
 
-  it("propagates cancellation and stops before concept planning", async () => {
+  it("propagates cancellation raised during research", async () => {
     const controller = new AbortController();
     const deps = adapters({
       doResearch: vi.fn(async (_domain, signal) => {
@@ -321,10 +353,94 @@ describe("createAdRunPlanner", () => {
       }),
     });
 
-    const result = await createAdRunPlanner(deps)("stripe.com", controller.signal);
+    const result = await createBriefResearcher(deps)(
+      "stripe.com",
+      controller.signal,
+    );
 
     expect(result).toEqual({ ok: false, error: { code: "aborted" } });
     expect(deps.doResearch).toHaveBeenCalledWith("stripe.com", controller.signal);
+  });
+});
+
+describe("createConceptPlanner", () => {
+  it("plans a contract-validated Ad Run from a Brief", async () => {
+    const deps = adapters();
+    const result = await createConceptPlanner(deps)(AD_RUN_BRIEF);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.brief).toEqual(BRIEF);
+    expect(result.value.concepts).toEqual(CONCEPTS);
+    expect(
+      result.value.concepts.slice(0, 3).map(({ subject }) => subject),
+    ).toEqual([{ kind: "company" }, { kind: "company" }, { kind: "company" }]);
+    expect(result.value.concepts.slice(3).map(({ subject }) => subject)).toEqual(
+      PRODUCTS.map((product) => ({ kind: "product", ...product })),
+    );
+    expect(deps.planConcepts).toHaveBeenCalledWith(BRIEF, PRODUCTS, undefined);
+  });
+
+  // An Ad Run advertises at most three Products; the rest of the catalog is
+  // there to be chosen from, not to be planned against.
+  it("advertises only the first three Products of a longer catalog", async () => {
+    const catalog = [
+      ...PRODUCTS,
+      {
+        name: "Stripe Radar",
+        description: "Block fraud with machine learning built into payments.",
+        imageUrl: null,
+      },
+      {
+        name: "Stripe Terminal",
+        description: "Accept in-person payments with programmable readers.",
+        imageUrl: null,
+      },
+    ];
+    const deps = adapters();
+
+    const result = await createConceptPlanner(deps)({
+      brief: BRIEF,
+      products: catalog,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(deps.planConcepts).toHaveBeenCalledWith(BRIEF, PRODUCTS, undefined);
+  });
+
+  it("rejects a Brief that violates the shared contract", async () => {
+    const deps = adapters();
+
+    const result = await createConceptPlanner(deps)({
+      brief: { ...BRIEF, domain: "Not A Domain" },
+      products: PRODUCTS,
+    });
+
+    expect(result).toMatchObject({ ok: false, error: { code: "internal" } });
+    expect(deps.planConcepts).not.toHaveBeenCalled();
+  });
+
+  it("short-circuits when generation is not configured", async () => {
+    const deps = adapters({ hasGenerationConfiguration: vi.fn(() => false) });
+
+    const result = await createConceptPlanner(deps)(AD_RUN_BRIEF);
+
+    expect(result).toEqual({ ok: false, error: { code: "not-configured" } });
+    expect(deps.planConcepts).not.toHaveBeenCalled();
+  });
+
+  it("returns aborted for a signal that is already cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const deps = adapters();
+
+    const result = await createConceptPlanner(deps)(
+      AD_RUN_BRIEF,
+      controller.signal,
+    );
+
+    expect(result).toEqual({ ok: false, error: { code: "aborted" } });
+    expect(deps.hasGenerationConfiguration).not.toHaveBeenCalled();
     expect(deps.planConcepts).not.toHaveBeenCalled();
   });
 
@@ -335,7 +451,7 @@ describe("createAdRunPlanner", () => {
       }),
     });
 
-    const result = await createAdRunPlanner(deps)("stripe.com");
+    const result = await createConceptPlanner(deps)(AD_RUN_BRIEF);
 
     expect(result).toMatchObject({ ok: false, error: { code: "internal" } });
   });
@@ -347,7 +463,7 @@ describe("createAdRunPlanner", () => {
       planConcepts: vi.fn(async () => duplicate),
     });
 
-    const result = await createAdRunPlanner(deps)("stripe.com");
+    const result = await createConceptPlanner(deps)(AD_RUN_BRIEF);
 
     expect(result).toMatchObject({ ok: false, error: { code: "internal" } });
   });

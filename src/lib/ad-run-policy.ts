@@ -6,6 +6,14 @@ export const AD_RUN_MIN_SIZE = 4 as const;
 export const AD_RUN_MAX_SIZE = 6 as const;
 export const AD_PRIMARY_MODEL_COUNT = 3 as const;
 
+/**
+ * How many Products the Brief may carry. An Ad Run still advertises at most
+ * AD_PRODUCT_CONCEPT_MAX of them; the rest exist so the person can choose which,
+ * which is impossible when the catalog is truncated to the number we happened to
+ * pick automatically.
+ */
+export const AD_CATALOG_MAX = 24 as const;
+
 export const AD_RUN_LIMITS = {
   domain: 253,
   brandName: 80,

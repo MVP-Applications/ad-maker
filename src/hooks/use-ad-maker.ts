@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   briefHref,
+  decodeAdRunBrief,
   decodeAdRunPlan,
   renderedAdHref,
   type AdBrief,
+  type AdRunBrief,
   type PlannedConcept,
 } from "@/lib/ad-run";
 import { normalizeDomain } from "@/lib/net";
@@ -291,15 +293,32 @@ export function useAdMaker(): AdMakerController {
       commit({ stage: "brief", epoch, submittedDomain });
 
       try {
-        const response = await fetch(briefHref(submittedDomain), {
+        const briefResponse = await fetch(briefHref(submittedDomain), {
           signal: rootController.signal,
         });
-        const payload: unknown = await response.json();
-        if (!response.ok) throw new Error(responseError(payload));
+        const briefPayload: unknown = await briefResponse.json();
+        if (!briefResponse.ok) throw new Error(responseError(briefPayload));
 
-        const plan = decodeAdRunPlan(payload);
-        if (plan.brief.domain !== submittedDomain) {
+        const adRunBrief: AdRunBrief = decodeAdRunBrief(briefPayload);
+        if (adRunBrief.brief.domain !== submittedDomain) {
           throw new Error("The Brief did not match the submitted domain.");
+        }
+
+        // Planning follows the Brief rather than riding along with it. Nothing
+        // yet chooses between the two, so the run is planned immediately; the
+        // gap is where the creative form goes.
+        const conceptsResponse = await fetch("/api/concepts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(adRunBrief),
+          signal: rootController.signal,
+        });
+        const conceptsPayload: unknown = await conceptsResponse.json();
+        if (!conceptsResponse.ok) throw new Error(responseError(conceptsPayload));
+
+        const plan = decodeAdRunPlan(conceptsPayload);
+        if (plan.brief.domain !== submittedDomain) {
+          throw new Error("The Ad Run did not match the submitted domain.");
         }
         if (
           rootController.signal.aborted ||

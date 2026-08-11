@@ -1,51 +1,23 @@
 import { NextResponse } from "next/server";
 import { briefHref } from "@/lib/ad-run";
-import {
-  planAdRun,
-  type AdRunPlanningFailure,
-} from "@/lib/generate/planner";
+import { adRunFailureResponse, failJson, NO_STORE } from "@/lib/api-failure";
+import { researchAdRunBrief } from "@/lib/generate/planner";
 import { normalizeDomain } from "@/lib/net";
 
 // brand-extractor reads the catalogue, the theme's stylesheets, and the chosen
-// products' own pages before answering — 15-60s on the stores measured, and the
-// concept call still has to run after it.
+// products' own pages before answering — 15-60s on the stores measured.
 export const maxDuration = 180;
 
 /**
- * GET /api/brief?domain=stripe.com&v=3
+ * GET /api/brief?domain=stripe.com&v=4
  *
- * The single entry point: one call to brand-extractor for brand data, palette,
- * typography, and flagship products, then one LLM call plans three Company ads
- * plus one to three Product ads. GET + Cache-Control lets identical versioned
- * plans reuse the CDN instead of re-running the extract.
+ * One call to brand-extractor for brand data, palette, typography, and the
+ * product catalogue. No concept is planned here: planning follows the choices
+ * made against this Brief, and lives behind POST /api/concepts. GET +
+ * Cache-Control lets identical versioned Briefs reuse the CDN instead of
+ * re-running the extract.
  */
 const CACHE_OK = "public, s-maxage=3600, stale-while-revalidate=86400";
-const NO_STORE = { "Cache-Control": "no-store", "CDN-Cache-Control": "no-store" };
-
-const fail = (message: string, status: number) =>
-  NextResponse.json({ error: message }, { status, headers: NO_STORE });
-
-function failureResponse(failure: AdRunPlanningFailure) {
-  switch (failure.code) {
-    case "invalid-domain":
-      return fail("Please enter a valid domain, e.g. stripe.com", 400);
-    case "not-configured":
-      return fail("Ad generation is temporarily unavailable. Please try again later.", 503);
-    case "aborted":
-      return fail("The request was cancelled.", 499);
-    case "domain-unreachable":
-      return fail("We couldn't find or reach this domain. Double-check the URL and try again.", 502);
-    case "brand-unavailable":
-      return fail("Couldn't load brand data for that domain. Try another one.", 502);
-    case "products-unavailable":
-      // The extractor reads published catalogue data, so a site without one
-      // lands here — most often a business that does not sell online.
-      return fail("Couldn't find products to advertise on that site. Try another one.", 502);
-    case "internal":
-      console.error("[brief] Ad Run planning failed:", failure.cause);
-      return fail("We couldn't prepare this ad run. Please try again.", 500);
-  }
-}
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -56,11 +28,11 @@ export async function GET(req: Request) {
     url.searchParams.getAll("domain").length !== 1 ||
     url.searchParams.getAll("v").length > 1
   ) {
-    return fail("Invalid brief request.", 400);
+    return failJson("Invalid brief request.", 400);
   }
 
   const domain = normalizeDomain(url.searchParams.get("domain") ?? "");
-  if (!domain) return failureResponse({ code: "invalid-domain" });
+  if (!domain) return adRunFailureResponse({ code: "invalid-domain" }, "brief");
 
   const canonicalHref = briefHref(domain);
   if (`${url.pathname}${url.search}` !== canonicalHref) {
@@ -70,8 +42,8 @@ export async function GET(req: Request) {
     });
   }
 
-  const result = await planAdRun(domain, req.signal);
-  if (!result.ok) return failureResponse(result.error);
+  const result = await researchAdRunBrief(domain, req.signal);
+  if (!result.ok) return adRunFailureResponse(result.error, "brief");
 
   return NextResponse.json(
     result.value,

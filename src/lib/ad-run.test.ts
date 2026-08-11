@@ -1,7 +1,9 @@
 import { expect, test } from "vitest";
 import {
+  AD_CATALOG_MAX,
   AD_RUN_LIMITS,
   briefHref,
+  decodeAdRunBrief,
   decodeAdRunPlan,
   decodeRenderedAdQuery,
   renderedAdHref,
@@ -70,6 +72,81 @@ const plan = (size = 6) => ({
     ...concept,
     subject: { ...concept.subject },
   })),
+});
+
+const adRunBrief = (productCount = 3) => ({
+  brief: {
+    ...brief,
+    colors: brief.colors.map((color) => ({ ...color })),
+  },
+  products: Array.from({ length: productCount }, (_, index) => ({
+    name: `Product ${index + 1}`,
+    description: `What product number ${index + 1} does for a customer.`,
+    imageUrl: null,
+  })),
+});
+
+test("decodes a Brief carrying a catalog longer than one Ad Run", () => {
+  const decoded = decodeAdRunBrief(adRunBrief(AD_CATALOG_MAX));
+
+  expect(decoded.products).toHaveLength(AD_CATALOG_MAX);
+  expect(decoded.brief.domain).toBe("stripe.com");
+  expect(decoded.products[0]).toEqual({
+    name: "Product 1",
+    description: "What product number 1 does for a customer.",
+    imageUrl: null,
+  });
+});
+
+// Nothing here asserts how many Products an Ad Run will use: that is the choice
+// this Brief exists to offer, and it is checked when the Concepts come back.
+test("decodes a Brief carrying a single Product", () => {
+  expect(decodeAdRunBrief(adRunBrief(1)).products).toHaveLength(1);
+});
+
+test.each([
+  [
+    "an empty catalog",
+    () => ({ ...adRunBrief(), products: [] }),
+  ],
+  [
+    "a catalog above the maximum",
+    () => adRunBrief(AD_CATALOG_MAX + 1),
+  ],
+  [
+    "duplicate Products, case-insensitively",
+    () => {
+      const candidate = adRunBrief(2);
+      candidate.products[1].name = candidate.products[0].name.toUpperCase();
+      return candidate;
+    },
+  ],
+  [
+    "a Product outside shared field bounds",
+    () => {
+      const candidate = adRunBrief(1);
+      candidate.products[0].name = "n".repeat(AD_RUN_LIMITS.productName + 1);
+      return candidate;
+    },
+  ],
+  [
+    "a Concept-shaped Product",
+    () => {
+      const candidate = adRunBrief(1);
+      Object.assign(candidate.products[0], { kind: "product" });
+      return candidate;
+    },
+  ],
+  [
+    "an unknown top-level field",
+    () => Object.assign(adRunBrief(), { concepts: [] }),
+  ],
+  [
+    "a missing brief",
+    () => ({ products: adRunBrief().products }),
+  ],
+])("rejects a Brief with %s", (_label, build) => {
+  expect(() => decodeAdRunBrief(build())).toThrow();
 });
 
 test.each([4, 5, 6] as const)(
@@ -203,7 +280,7 @@ test("rejects malformed non-subject Ad Run invariants", () => {
 
 test("builds the versioned canonical Brief href", () => {
   expect(briefHref("https://www.stripe.com/pricing")).toBe(
-    "/api/brief?domain=stripe.com&v=3",
+    "/api/brief?domain=stripe.com&v=4",
   );
 });
 

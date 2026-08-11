@@ -6,7 +6,7 @@ import {
 import { normalizeFontFamily } from "@/lib/font-family";
 import type { Product } from "@/lib/ad-run";
 import {
-  AD_PRODUCT_CONCEPT_MAX,
+  AD_CATALOG_MAX,
   AD_PRODUCT_CONCEPT_MIN,
   AD_RUN_LIMITS,
 } from "@/lib/ad-run-policy";
@@ -196,7 +196,9 @@ function researchFrom(domain: string, body: ExtractResponse): BrandResearch {
       fontFamily: normalizeFontFamily(valueOf(brand.font)),
     },
     summary: (body.facts?.sample_copy ?? []).join(" ").trim(),
-    products: products.slice(0, AD_PRODUCT_CONCEPT_MAX),
+    // The whole catalog the extractor found, not the handful an Ad Run uses:
+    // the person choosing a Product cannot pick one the Brief never carried.
+    products: products.slice(0, AD_CATALOG_MAX),
   };
 }
 
