@@ -134,6 +134,18 @@ function atPhase<Phase extends AdMakerController["phase"]>(
   return controller as Extract<AdMakerController, { phase: Phase }>;
 }
 
+/**
+ * The run now stops at the Brief, so every test that wants ads has to ask for
+ * them. Reaching the gallery is two steps, not one.
+ */
+async function startAndGenerate(
+  result: { current: AdMakerController },
+  domain = "stripe.com",
+): Promise<void> {
+  await act(() => atPhase(result.current, "idle").start(domain));
+  await act(() => atPhase(result.current, "compose").generate());
+}
+
 describe("useAdMaker", () => {
   const fetchMock = vi.fn<typeof fetch>();
   const createObjectURL = vi.fn<(blob: Blob) => string>();
@@ -168,9 +180,8 @@ describe("useAdMaker", () => {
       return planning ? Promise.resolve(planning) : pendingAd.promise;
     });
     const { result, unmount } = renderHook(() => useAdMaker());
-    const start = atPhase(result.current, "idle").start;
 
-    await act(() => start("HTTPS://WWW.Stripe.COM/Pricing"));
+    await startAndGenerate(result, "HTTPS://WWW.Stripe.COM/Pricing");
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "/api/brief?domain=stripe.com&v=4",
@@ -180,6 +191,103 @@ describe("useAdMaker", () => {
     expect(generating.submittedDomain).toBe("stripe.com");
     expect(generating.brief.domain).toBe("stripe.com");
     unmount();
+  });
+
+  // The Brief is an answer on its own now: it arrives, and the run waits.
+  it("stops at the Brief and plans nothing until asked", async () => {
+    const plan = planFor();
+    const pendingAd = deferred<Response>();
+    fetchMock.mockImplementation((input) => {
+      const planning = planningResponse(plan, String(input));
+      return planning ? Promise.resolve(planning) : pendingAd.promise;
+    });
+    const { result } = renderHook(() => useAdMaker());
+
+    await act(() => atPhase(result.current, "idle").start("stripe.com"));
+
+    const compose = atPhase(result.current, "compose");
+    expect(compose.brief.domain).toBe("stripe.com");
+    expect(compose.products).toEqual(briefFor(plan).products);
+    expect(compose.planning).toBe(false);
+    expect(compose.error).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/brief?domain=stripe.com&v=4",
+    );
+
+    await act(() => compose.generate());
+
+    expect(result.current.phase).toBe("generating");
+  });
+
+  // A failed plan must not cost the extract that produced the Brief, so the
+  // choices made against it survive and can simply be sent again.
+  it("keeps the Brief when planning fails and can be asked again", async () => {
+    const plan = planFor();
+    let conceptCalls = 0;
+    fetchMock.mockImplementation((input) => {
+      const href = String(input);
+      if (href.startsWith("/api/brief")) {
+        return Promise.resolve(jsonResponse(briefFor(plan)));
+      }
+      if (href.startsWith("/api/concepts")) {
+        conceptCalls += 1;
+        return Promise.resolve(
+          conceptCalls === 1
+            ? jsonResponse({ error: "Director unavailable." }, false)
+            : jsonResponse(plan),
+        );
+      }
+      return Promise.resolve(imageResponse());
+    });
+    const { result } = renderHook(() => useAdMaker());
+
+    await act(() => atPhase(result.current, "idle").start("stripe.com"));
+    await act(() => atPhase(result.current, "compose").generate());
+
+    const failed = atPhase(result.current, "compose");
+    expect(failed.error).toBe("Director unavailable.");
+    expect(failed.planning).toBe(false);
+    expect(failed.products).toEqual(briefFor(plan).products);
+
+    await act(() => failed.generate());
+
+    await waitFor(() => expect(result.current.phase).toBe("done"));
+    // One Brief, two planning attempts, then the ads.
+    expect(conceptCalls).toBe(2);
+  });
+
+  it("ignores a second request to generate while one is in flight", async () => {
+    const pendingPlan = deferred<Response>();
+    fetchMock.mockImplementation((input) => {
+      const href = String(input);
+      if (href.startsWith("/api/brief")) {
+        return Promise.resolve(jsonResponse(briefFor(planFor())));
+      }
+      if (href.startsWith("/api/concepts")) return pendingPlan.promise;
+      return Promise.resolve(imageResponse());
+    });
+    const { result } = renderHook(() => useAdMaker());
+
+    await act(() => atPhase(result.current, "idle").start("stripe.com"));
+    const compose = atPhase(result.current, "compose");
+    void compose.generate();
+    await waitFor(() =>
+      expect(atPhase(result.current, "compose").planning).toBe(true),
+    );
+
+    await act(() => atPhase(result.current, "compose").generate());
+
+    expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).startsWith("/api/concepts"),
+      ),
+    ).toHaveLength(1);
+
+    await act(async () => {
+      pendingPlan.resolve(jsonResponse(planFor()));
+      await pendingPlan.promise;
+    });
   });
 
   it("rejects a valid Brief for a domain other than the submitted domain", async () => {
@@ -207,12 +315,12 @@ describe("useAdMaker", () => {
       ),
     );
     const { result } = renderHook(() => useAdMaker());
-    const start = atPhase(result.current, "idle").start;
 
-    await act(() => start("stripe.com"));
+    await act(() => atPhase(result.current, "idle").start("stripe.com"));
+    await act(() => atPhase(result.current, "compose").generate());
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(atPhase(result.current, "idle").error).toBe(
+    expect(atPhase(result.current, "compose").error).toBe(
       "The Ad Run did not match the submitted domain.",
     );
   });
@@ -233,9 +341,8 @@ describe("useAdMaker", () => {
       return retry.promise;
     });
     const { result } = renderHook(() => useAdMaker());
-    const start = atPhase(result.current, "idle").start;
 
-    await act(() => start("stripe.com"));
+    await startAndGenerate(result);
     await waitFor(() => {
       expect(atPhase(result.current, "generating").slots[0].status).toBe(
         "error",
@@ -272,9 +379,8 @@ describe("useAdMaker", () => {
       return planning ? Promise.resolve(planning) : pendingAd.promise;
     });
     const { result } = renderHook(() => useAdMaker());
-    const start = atPhase(result.current, "idle").start;
 
-    await act(() => start("stripe.com"));
+    await startAndGenerate(result);
     const generating = atPhase(result.current, "generating");
     // Calls 0 and 1 are the Brief and the Concepts; the first ad follows them.
     const rootSignal = (fetchMock.mock.calls[2]?.[1] as RequestInit).signal;
@@ -309,9 +415,8 @@ describe("useAdMaker", () => {
       return retry.promise;
     });
     const { result } = renderHook(() => useAdMaker());
-    const start = atPhase(result.current, "idle").start;
 
-    await act(() => start("stripe.com"));
+    await startAndGenerate(result);
     await waitFor(() => expect(result.current.phase).toBe("done"));
 
     act(() => atPhase(result.current, "done").retrySlot(0));
@@ -335,9 +440,8 @@ describe("useAdMaker", () => {
         ),
       );
       const { result, unmount } = renderHook(() => useAdMaker());
-      const start = atPhase(result.current, "idle").start;
 
-      await act(() => start("stripe.com"));
+      await startAndGenerate(result);
       await waitFor(() => expect(result.current.phase).toBe("done"));
       const completed = atPhase(result.current, "done");
       expect(completed.slots).toHaveLength(total);

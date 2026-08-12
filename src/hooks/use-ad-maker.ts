@@ -9,6 +9,7 @@ import {
   type AdBrief,
   type AdRunBrief,
   type PlannedConcept,
+  type Product,
 } from "@/lib/ad-run";
 import { normalizeDomain } from "@/lib/net";
 
@@ -51,6 +52,22 @@ type BriefController = {
   reset(): void;
 };
 
+/**
+ * The Brief is read and nothing has been decided yet. The run waits here for
+ * the choices that shape it; today the only one is whether to make it at all.
+ */
+type ComposeController = {
+  phase: "compose";
+  submittedDomain: string;
+  brief: AdBrief;
+  products: readonly Product[];
+  /** True from the moment Concepts are asked for until they arrive or fail. */
+  planning: boolean;
+  error: string | null;
+  generate(): Promise<void>;
+  reset(): void;
+};
+
 type ActiveController = {
   submittedDomain: string;
   brief: AdBrief;
@@ -76,12 +93,21 @@ type DoneController = ActiveController & {
 export type AdMakerController =
   | IdleController
   | BriefController
+  | ComposeController
   | GeneratingController
   | DoneController;
 
 type InternalState =
   | { stage: "idle"; error: string | null }
   | { stage: "brief"; epoch: number; submittedDomain: string }
+  | {
+      stage: "compose";
+      epoch: number;
+      submittedDomain: string;
+      adRunBrief: AdRunBrief;
+      planning: boolean;
+      error: string | null;
+    }
   | {
       stage: "gallery";
       epoch: number;
@@ -273,6 +299,14 @@ export function useAdMaker(): AdMakerController {
     [commit, isCurrentAttempt, revokeUrl],
   );
 
+  const isStale = useCallback(
+    (epoch: number, rootController: AbortController) =>
+      rootController.signal.aborted ||
+      epochRef.current !== epoch ||
+      rootControllerRef.current !== rootController,
+    [],
+  );
+
   const start = useCallback(
     async (rawDomain: string) => {
       setDomain(rawDomain);
@@ -293,74 +327,30 @@ export function useAdMaker(): AdMakerController {
       commit({ stage: "brief", epoch, submittedDomain });
 
       try {
-        const briefResponse = await fetch(briefHref(submittedDomain), {
+        const response = await fetch(briefHref(submittedDomain), {
           signal: rootController.signal,
         });
-        const briefPayload: unknown = await briefResponse.json();
-        if (!briefResponse.ok) throw new Error(responseError(briefPayload));
+        const payload: unknown = await response.json();
+        if (!response.ok) throw new Error(responseError(payload));
 
-        const adRunBrief: AdRunBrief = decodeAdRunBrief(briefPayload);
+        const adRunBrief: AdRunBrief = decodeAdRunBrief(payload);
         if (adRunBrief.brief.domain !== submittedDomain) {
           throw new Error("The Brief did not match the submitted domain.");
         }
+        if (isStale(epoch, rootController)) return;
 
-        // Planning follows the Brief rather than riding along with it. Nothing
-        // yet chooses between the two, so the run is planned immediately; the
-        // gap is where the creative form goes.
-        const conceptsResponse = await fetch("/api/concepts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(adRunBrief),
-          signal: rootController.signal,
-        });
-        const conceptsPayload: unknown = await conceptsResponse.json();
-        if (!conceptsResponse.ok) throw new Error(responseError(conceptsPayload));
-
-        const plan = decodeAdRunPlan(conceptsPayload);
-        if (plan.brief.domain !== submittedDomain) {
-          throw new Error("The Ad Run did not match the submitted domain.");
-        }
-        if (
-          rootController.signal.aborted ||
-          epochRef.current !== epoch ||
-          rootControllerRef.current !== rootController
-        ) {
-          return;
-        }
-
-        const slots = plan.concepts.map((concept) => ({
-          status: "loading" as const,
-          concept,
-          attempt: 1,
-        }));
-        attemptsRef.current = plan.concepts.map(() => 1);
+        // The run stops here. Planning is a separate call precisely so that the
+        // choices made against this Brief can come between the two.
         commit({
-          stage: "gallery",
+          stage: "compose",
           epoch,
           submittedDomain,
-          brief: plan.brief,
-          slots,
-          settled: false,
-        });
-
-        plan.concepts.forEach((concept, index) => {
-          void fetchSlot(
-            epoch,
-            plan.brief,
-            concept,
-            index,
-            1,
-            rootController.signal,
-          );
+          adRunBrief,
+          planning: false,
+          error: null,
         });
       } catch (error) {
-        if (
-          rootController.signal.aborted ||
-          epochRef.current !== epoch ||
-          rootControllerRef.current !== rootController
-        ) {
-          return;
-        }
+        if (isStale(epoch, rootController)) return;
         rootControllerRef.current = null;
         commit({
           stage: "idle",
@@ -368,8 +358,80 @@ export function useAdMaker(): AdMakerController {
         });
       }
     },
-    [commit, fetchSlot, invalidateCurrentRun],
+    [commit, invalidateCurrentRun, isStale],
   );
+
+  const generate = useCallback(async () => {
+    const current = stateRef.current;
+    const rootController = rootControllerRef.current;
+    if (
+      current.stage !== "compose" ||
+      current.planning ||
+      !rootController ||
+      rootController.signal.aborted
+    ) {
+      return;
+    }
+
+    const { epoch, submittedDomain, adRunBrief } = current;
+    commit({ ...current, planning: true, error: null });
+
+    try {
+      const response = await fetch("/api/concepts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(adRunBrief),
+        signal: rootController.signal,
+      });
+      const payload: unknown = await response.json();
+      if (!response.ok) throw new Error(responseError(payload));
+
+      const plan = decodeAdRunPlan(payload);
+      if (plan.brief.domain !== submittedDomain) {
+        throw new Error("The Ad Run did not match the submitted domain.");
+      }
+      if (isStale(epoch, rootController)) return;
+
+      const slots = plan.concepts.map((concept) => ({
+        status: "loading" as const,
+        concept,
+        attempt: 1,
+      }));
+      attemptsRef.current = plan.concepts.map(() => 1);
+      setElapsed(0);
+      commit({
+        stage: "gallery",
+        epoch,
+        submittedDomain,
+        brief: plan.brief,
+        slots,
+        settled: false,
+      });
+
+      plan.concepts.forEach((concept, index) => {
+        void fetchSlot(
+          epoch,
+          plan.brief,
+          concept,
+          index,
+          1,
+          rootController.signal,
+        );
+      });
+    } catch (error) {
+      if (isStale(epoch, rootController)) return;
+      // Stay on the Brief rather than dropping to the start: the extract that
+      // produced it cost 15-60s and the choices made against it still stand.
+      commit({
+        stage: "compose",
+        epoch,
+        submittedDomain,
+        adRunBrief,
+        planning: false,
+        error: (error as Error)?.message || DEFAULT_ERROR,
+      });
+    }
+  }, [commit, fetchSlot, isStale]);
 
   const reset = useCallback(() => {
     invalidateCurrentRun();
@@ -533,6 +595,18 @@ export function useAdMaker(): AdMakerController {
     return {
       phase: "brief",
       submittedDomain: state.submittedDomain,
+      reset,
+    };
+  }
+  if (state.stage === "compose") {
+    return {
+      phase: "compose",
+      submittedDomain: state.submittedDomain,
+      brief: state.adRunBrief.brief,
+      products: state.adRunBrief.products,
+      planning: state.planning,
+      error: state.error,
+      generate,
       reset,
     };
   }

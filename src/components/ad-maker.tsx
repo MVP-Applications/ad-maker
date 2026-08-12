@@ -10,13 +10,23 @@ import {
   RefreshIcon,
   XIcon,
 } from "@/components/icons";
-import { AD_RUN_MAX_SIZE, AD_RUN_MIN_SIZE } from "@/lib/ad-run";
+import {
+  AD_COMPANY_CONCEPT_COUNT,
+  AD_PRODUCT_CONCEPT_MAX,
+  AD_RUN_MAX_SIZE,
+  AD_RUN_MIN_SIZE,
+  type AdBrief,
+} from "@/lib/ad-run";
 import { directionByKey } from "@/lib/generate/directions";
 import { imageModelById, takesProductPhoto } from "@/lib/generate/models";
 import type { AdMakerController, AdSlot } from "@/hooks/use-ad-maker";
 
 type IdleController = Extract<AdMakerController, { phase: "idle" }>;
-type WorkspaceController = Exclude<AdMakerController, { phase: "idle" }>;
+type ComposeController = Extract<AdMakerController, { phase: "compose" }>;
+type WorkspaceController = Exclude<
+  AdMakerController,
+  { phase: "idle" } | { phase: "compose" }
+>;
 
 const EXAMPLE_DOMAINS = ["stripe.com", "linear.app", "notion.so", "vercel.com"];
 const AD_EXAMPLES = [
@@ -41,7 +51,13 @@ export function AdMaker({ s }: { s: AdMakerController }) {
       )}
       <div className="relative z-10 flex flex-1 flex-col">
         <Header />
-        {s.phase === "idle" ? <Hero s={s} /> : <Workspace s={s} />}
+        {s.phase === "idle" ? (
+          <Hero s={s} />
+        ) : s.phase === "compose" ? (
+          <Compose s={s} />
+        ) : (
+          <Workspace s={s} />
+        )}
       </div>
       <FortuneCookie />
     </div>
@@ -126,6 +142,98 @@ function Hero({ s }: { s: IdleController }) {
   );
 }
 
+/* ──────────── brief read, nothing decided: the creative form ──────────── */
+
+/**
+ * Where the run waits for its choices. Only one is offered so far — whether to
+ * make the run at all — so this screen states what the Ad Run would be rather
+ * than asking anything. The selectors replace that statement.
+ */
+function Compose({ s }: { s: ComposeController }) {
+  const advertised = s.products.slice(0, AD_PRODUCT_CONCEPT_MAX);
+  const total = AD_COMPANY_CONCEPT_COUNT + advertised.length;
+
+  return (
+    <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 px-5 py-8">
+      <BrandBar
+        brief={s.brief}
+        cleanDomain={s.submittedDomain}
+        onReset={s.reset}
+      />
+
+      <section className="animate-fade-up rounded-2xl border border-border bg-card p-5 [animation-delay:80ms]">
+        <h2 className="text-[15px] font-semibold text-foreground">
+          Ready to generate {total} ads
+        </h2>
+        <p className="mt-1 text-[13px] text-muted-foreground">
+          {AD_COMPANY_CONCEPT_COUNT} for {s.brief.brandName} itself, plus one for
+          each product below.
+        </p>
+
+        <ul className="mt-4 grid grid-cols-1 gap-3 min-[480px]:grid-cols-2 lg:grid-cols-3">
+          {advertised.map((product) => (
+            <li
+              key={product.name}
+              className="flex items-center gap-3 rounded-xl border border-border bg-background p-3"
+            >
+              <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg bg-brand-dark ring-1 ring-border">
+                {product.imageUrl ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={product.imageUrl}
+                    alt=""
+                    className="size-full object-cover"
+                  />
+                ) : (
+                  <span className="text-[10px] text-muted-foreground">no photo</span>
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-[13px] font-semibold text-foreground">
+                  {product.name}
+                </p>
+                <p className="truncate text-[11px] text-muted-foreground">
+                  {product.description}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        {s.products.length > advertised.length && (
+          <p className="mt-3 text-[11px] text-muted-foreground">
+            {s.products.length - advertised.length} more product
+            {s.products.length - advertised.length === 1 ? "" : "s"} found on
+            this site — choosing between them comes next.
+          </p>
+        )}
+
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => void s.generate()}
+            disabled={s.planning}
+            className="btn-gradient disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {s.planning ? (
+              <>
+                <span className="size-4 animate-spin rounded-full border-2 border-white/50 border-t-transparent" />
+                Planning…
+              </>
+            ) : (
+              <>✨ Generate {total} Ads</>
+            )}
+          </button>
+          <button onClick={s.reset} className="btn-secondary text-[13px]">
+            <RefreshIcon /> Try another brand
+          </button>
+        </div>
+
+        {s.error && <p className="mt-3 text-xs text-red-500">{s.error}</p>}
+      </section>
+    </main>
+  );
+}
+
 /* ─────────────── after submit: the same page, morphed ─────────────── */
 
 const fmtElapsed = (secs: number) =>
@@ -149,7 +257,11 @@ function Workspace({ s }: { s: WorkspaceController }) {
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 px-5 py-8">
-      <BrandBar s={s} cleanDomain={cleanDomain} />
+      <BrandBar
+        brief={s.phase === "brief" ? null : s.brief}
+        cleanDomain={cleanDomain}
+        onReset={s.reset}
+      />
 
       {(s.phase === "brief" || generating) && (
         <div className="animate-fade-up rounded-2xl border border-border bg-card px-4 py-3.5 [animation-delay:80ms]">
@@ -248,13 +360,15 @@ function Workspace({ s }: { s: WorkspaceController }) {
 }
 
 function BrandBar({
-  s,
+  brief: b,
   cleanDomain,
+  onReset,
 }: {
-  s: WorkspaceController;
+  /** Null only while the extract is still running and no brand is known yet. */
+  brief: AdBrief | null;
   cleanDomain: string;
+  onReset: () => void;
 }) {
-  const b = s.phase === "brief" ? null : s.brief;
   return (
     <div className="animate-fade-up overflow-hidden rounded-2xl border border-border bg-card shadow-card">
       <div className="flex flex-wrap items-center gap-3 p-4 sm:gap-4">
@@ -297,7 +411,7 @@ function BrandBar({
         )}
 
         <button
-          onClick={s.reset}
+          onClick={onReset}
           aria-label="Start over"
           className="btn-secondary h-9 shrink-0 px-3 text-[12px]"
         >
