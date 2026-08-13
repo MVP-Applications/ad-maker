@@ -552,7 +552,7 @@ function ImagesSheet({
         {usable.length} image{usable.length === 1 ? "" : "s"} · the hero shot,
         then each kept Product&apos;s own photograph.
       </p>
-      <div className="grid max-h-[46vh] grid-cols-4 gap-2 overflow-y-auto pr-1">
+      <div className="studio-scroll grid max-h-[46vh] grid-cols-4 gap-2 overflow-y-auto pr-1">
         {usable.map((url) => (
           <a
             key={url}
@@ -616,7 +616,7 @@ function ProductsSheet({
         {kept.length} of {catalogue.length} kept · an ad can only be written
         about a Product the shop describes.
       </p>
-      <div className="max-h-[46vh] space-y-1 overflow-y-auto pr-1">
+      <div className="studio-scroll max-h-[46vh] space-y-1 overflow-y-auto pr-1">
         {ordered.map((product) => {
           const checked = keptKeys.has(productKey(product.name));
           const advertisable = Boolean(product.description);
@@ -1627,6 +1627,7 @@ function Studio({ s }: { s: StudioController }) {
   const [railOpen, setRailOpen] = useState(true);
   const [editing, setEditing] = useState(false);
   const edgeReached = useLeftEdgeReach(!railOpen);
+  const sideBySide = useSideBySide();
   const busy = made.some((c) => c.status === "loading");
 
   // Object URLs are owned here, so they are released when the screen goes.
@@ -1693,23 +1694,40 @@ function Studio({ s }: { s: StudioController }) {
 
   return (
     <div className="studio-bg flex min-h-[100dvh] w-full flex-col lg:h-[100dvh] lg:flex-row lg:overflow-hidden">
-      {railOpen && (
-        <BrandRail
-          brief={s.brief}
-          submittedDomain={s.submittedDomain}
-          onClose={() => setRailOpen(false)}
-          footer={
-            <button
-              onClick={() => setEditing(true)}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-white/[0.07] px-3 py-2 text-[12.5px] text-[#f4f2ef] transition hover:bg-white/[0.12]"
-            >
-              <PencilIcon className="size-3.5" /> Edit brand
-            </button>
-          }
-        />
-      )}
+      {/* Kept mounted and slid out of the way rather than unmounted, so the
+          panel leaves the way it arrives. The track collapses its width while
+          the panel inside travels the same distance, which is what makes the
+          sheet close the gap in step with it instead of snapping. */}
+      {/* Slid aside rather than unmounted, so the panel leaves the way it
+          arrives. The negative margin is what the sheet closes into: the panel
+          keeps its width and travels out of the row, and the root's overflow
+          clip takes care of the part that leaves the window. */}
+      <div
+        aria-hidden={!railOpen}
+        // The travel is an inline style rather than a class: it is one number
+        // that depends on the breakpoint, and a media-query utility cannot be
+        // read back or interpolated as reliably as the number itself.
+        style={
+          sideBySide
+            ? { marginLeft: railOpen ? 0 : -RAIL_WIDTH }
+            : { maxHeight: railOpen ? "80vh" : 0 }
+        }
+        className={`rail-slide shrink-0 overflow-hidden lg:h-[100dvh] lg:w-[292px] ${
+          railOpen ? "" : "pointer-events-none"
+        }`}
+      >
+        <div className="h-full w-full lg:w-[292px]">
+          <BrandRail
+            brief={s.brief}
+            submittedDomain={s.submittedDomain}
+            products={"products" in s ? s.products : []}
+            onClose={() => setRailOpen(false)}
+            onEdit={() => setEditing(true)}
+          />
+        </div>
+      </div>
 
-      <main className="relative flex min-w-0 flex-1 flex-col lg:h-full lg:overflow-hidden">
+      <main className="rail-neighbour relative flex min-w-0 flex-1 flex-col lg:h-full lg:overflow-hidden">
         {/* No bar above the sheet — the work starts at the top of the window.
             The one control that has to survive hiding the panel waits at the
             edge the panel came from, and only while it is being reached for. */}
@@ -1718,7 +1736,7 @@ function Studio({ s }: { s: StudioController }) {
             onClick={() => setRailOpen(true)}
             aria-label="Show the brand panel"
             title="Show the brand panel"
-            className={`studio-panel fixed left-3 top-4 z-30 grid size-9 place-items-center rounded-lg border border-white/[0.14] text-[#8b8b93] transition-all duration-300 hover:text-[#f4f2ef] focus-visible:opacity-100 ${
+            className={`studio-panel fixed left-3 top-4 z-30 grid size-9 place-items-center rounded-lg border border-white/[0.14] text-[#8b8b93] transition-[opacity,transform] duration-300 ease-out hover:text-[#f4f2ef] focus-visible:opacity-100 ${
               edgeReached
                 ? "translate-x-0 opacity-100"
                 : "pointer-events-none -translate-x-3 opacity-0"
@@ -1728,7 +1746,7 @@ function Studio({ s }: { s: StudioController }) {
           </button>
         )}
 
-        <div className="min-h-0 flex-1 overflow-y-auto pb-40">
+        <div className="studio-scroll min-h-0 flex-1 overflow-y-auto pb-40">
           {made.length === 0 ? (
             <div className="flex h-full min-h-[50vh] flex-col items-center justify-center gap-2 px-6 text-center">
               <p className="text-[14px] text-[#c9c7c2]">
@@ -1799,7 +1817,7 @@ function CompositionTile({
             src={c.url}
             alt={c.prompt}
             onLoad={() => setLoaded(true)}
-            className={`size-full object-cover transition-all duration-700 ${
+            className={`size-full object-cover transition-[opacity,transform,filter] duration-700 ${
               loaded ? "scale-100 opacity-100 blur-0" : "scale-[1.02] opacity-0 blur-md"
             }`}
           />
@@ -1873,6 +1891,24 @@ function Shimmer() {
  * to escape. Reaching for the edge is the gesture that asks for it back, so
  * the edge is what listens.
  */
+/** True once the layout is wide enough for the rail to be a side column. */
+/** The rail's width, shared by the panel and the distance it travels. */
+const RAIL_WIDTH = 292;
+
+function useSideBySide(): boolean {
+  const [wide, setWide] = useState(false);
+
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 1024px)");
+    const sync = () => setWide(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+
+  return wide;
+}
+
 function useLeftEdgeReach(active: boolean, within = 72): boolean {
   const [near, setNear] = useState(false);
 
@@ -1889,21 +1925,24 @@ function useLeftEdgeReach(active: boolean, within = 72): boolean {
   return near;
 }
 
+/** The brand, kept beside the work rather than on top of it. */
 function BrandRail({
   brief: b,
   submittedDomain,
+  products,
   onClose,
-  footer,
+  onEdit,
 }: {
   brief: AdBrief;
   submittedDomain: string;
+  products: readonly Product[];
   onClose: () => void;
-  footer?: React.ReactNode;
+  onEdit: () => void;
 }) {
   return (
-    <aside className="studio-panel flex w-full shrink-0 flex-col border-b border-white/[0.14] lg:h-[100dvh] lg:w-[292px] lg:border-b-0 lg:border-r">
-      <div className="flex items-center gap-3 border-b border-white/[0.14] px-4 py-3.5">
-        <div className="logo-light grid size-9 shrink-0 place-items-center overflow-hidden rounded-lg">
+    <aside className="studio-panel flex h-full w-full shrink-0 flex-col border-b border-white/[0.14] lg:h-[100dvh] lg:w-[292px] lg:border-b-0 lg:border-r">
+      <div className="flex items-center gap-2.5 border-b border-white/[0.14] px-3.5 py-3">
+        <div className="logo-light grid size-8 shrink-0 place-items-center overflow-hidden rounded-lg">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={
@@ -1911,17 +1950,24 @@ function BrandRail({
               `https://www.google.com/s2/favicons?sz=64&domain=${submittedDomain}`
             }
             alt=""
-            className="logo-edge max-h-6 max-w-full object-contain"
+            className="logo-edge max-h-5 max-w-full object-contain"
           />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13.5px] font-semibold text-[#f4f2ef]">
+          <p className="truncate text-[13px] font-semibold text-[#f4f2ef]">
             {b.brandName}
           </p>
-          <p className="truncate text-[11px] text-[#8b8b93]">{b.domain}</p>
+          <p className="truncate text-[10.5px] text-[#6f6f78]">{b.domain}</p>
         </div>
-        {/* The same mark that brings it back, so the control reads as one
-            toggle in two positions rather than two different buttons. */}
+        {/* Both controls the panel owns, in the corner it owns. */}
+        <button
+          onClick={onEdit}
+          aria-label="Edit brand"
+          title="Edit brand"
+          className="grid size-7 shrink-0 place-items-center rounded-lg text-[#6f6f78] transition hover:bg-white/[0.07] hover:text-[#f4f2ef]"
+        >
+          <PencilIcon className="size-3.5" />
+        </button>
         <button
           onClick={onClose}
           aria-label="Hide the brand panel"
@@ -1932,74 +1978,100 @@ function BrandRail({
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
-        {b.mood && (
-          <RailBlock label="Visual mood">
-            <p className="text-[12px] leading-relaxed text-[#c9c7c2]">{b.mood}</p>
-          </RailBlock>
-        )}
-
+      {/* The portfolio, said in as little room as it can be said in: the
+          products below are the longer list, and they are what a person
+          scrolls this panel to reach. */}
+      <div className="shrink-0 space-y-2.5 border-b border-white/[0.14] px-3.5 py-3">
         {b.colors.length > 0 && (
-          <RailBlock label="Palette">
-            <div className="flex gap-1">
-              {b.colors.slice(0, AD_RUN_LIMITS.palette).map((color, index) => (
-                <span
-                  key={`${index}-${color.hex}`}
-                  title={color.hex}
-                  className="h-7 min-w-0 flex-1 rounded-[3px]"
-                  style={{ background: color.hex }}
-                />
-              ))}
-            </div>
-            <p className="mt-1.5 text-[11px] text-[#8b8b93]">
-              {b.colorA} · {b.colorB}
-            </p>
-          </RailBlock>
+          <div className="flex gap-0.5 overflow-hidden rounded-[5px]">
+            {b.colors.slice(0, AD_RUN_LIMITS.palette).map((color, index) => (
+              <span
+                key={`${index}-${color.hex}`}
+                title={`${color.name ?? "Colour"} · ${color.hex}`}
+                className="h-5 min-w-0 flex-1"
+                style={{ background: color.hex }}
+              />
+            ))}
+          </div>
         )}
 
-        <RailBlock label="Typeface">
-          <p
-            className="truncate text-[19px] leading-tight text-[#f4f2ef]"
+        <div className="flex items-baseline justify-between gap-2">
+          <span
+            className="truncate text-[15px] text-[#f4f2ef]"
             style={{ fontFamily: fontPreviewStack(b.fontFamily) }}
           >
             {b.brandName}
-          </p>
-          <p className="mt-1 truncate text-[11px] text-[#8b8b93]">
+          </span>
+          <span className="shrink-0 truncate text-[10.5px] text-[#6f6f78]">
             {b.fontFamily ?? "Not stated"}
+          </span>
+        </div>
+
+        {b.mood && (
+          <p className="line-clamp-2 text-[11.5px] leading-relaxed text-[#8b8b93]">
+            {b.mood}
           </p>
-        </RailBlock>
-
-        {b.languages.length > 0 && (
-          <RailBlock label="Language">
-            <div className="flex flex-wrap gap-1">
-              {b.languages.slice(0, 4).map((tag) => (
-                <span
-                  key={tag}
-                  title={languageName(tag)}
-                  className="rounded-[4px] bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-semibold uppercase text-[#c9c7c2]"
-                >
-                  {tag}
-                </span>
-              ))}
-              {b.languages.length > 4 && (
-                <span className="rounded-[4px] bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-semibold text-[#8b8b93]">
-                  +{b.languages.length - 4}
-                </span>
-              )}
-            </div>
-          </RailBlock>
         )}
 
-        {b.headline && (
-          <RailBlock label="Headline">
-            <p className="text-[12px] leading-relaxed text-[#c9c7c2]">
-              {b.headline}
-            </p>
-          </RailBlock>
-        )}
+        <div className="flex flex-wrap items-center gap-1">
+          {b.languages.slice(0, 3).map((tag) => (
+            <span
+              key={tag}
+              title={languageName(tag)}
+              className="rounded-[4px] bg-white/[0.06] px-1.5 py-0.5 text-[9.5px] font-semibold uppercase text-[#8b8b93]"
+            >
+              {tag}
+            </span>
+          ))}
+          {b.languages.length > 3 && (
+            <span className="text-[10px] text-[#6f6f78]">
+              +{b.languages.length - 3}
+            </span>
+          )}
+          <span className="ml-auto truncate text-[10.5px] text-[#6f6f78]">
+            {b.colorA} · {b.colorB}
+          </span>
+        </div>
       </div>
 
-      <div className="border-t border-white/[0.14] px-4 py-3.5">{footer}</div>
+      <div className="flex shrink-0 items-baseline justify-between px-3.5 pb-1.5 pt-3">
+        <p className="text-[10px] font-medium uppercase tracking-[0.13em] text-[#6f6f78]">
+          Products
+        </p>
+        <p className="text-[10.5px] text-[#6f6f78]">{products.length}</p>
+      </div>
+
+      <div className="studio-scroll min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+        {products.length === 0 ? (
+          <p className="px-1.5 text-[11.5px] text-[#6f6f78]">None found</p>
+        ) : (
+          <ul className="space-y-0.5">
+            {products.map((product) => (
+              <li key={product.name}>
+                <div
+                  title={product.description || product.name}
+                  className="flex items-center gap-2 rounded-lg px-1.5 py-1 transition hover:bg-white/[0.05]"
+                >
+                  <span className="logo-light size-7 shrink-0 overflow-hidden rounded-[5px]">
+                    {product.imageUrl && (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={product.imageUrl}
+                        alt=""
+                        loading="lazy"
+                        className="size-full object-cover"
+                      />
+                    )}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[11.5px] text-[#c9c7c2]">
+                    {product.name}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </aside>
   );
 }
@@ -2038,7 +2110,7 @@ function BrandSheet({
         onClose();
       }}
     >
-      <div className="max-h-[58vh] space-y-4 overflow-y-auto pr-1">
+      <div className="studio-scroll max-h-[58vh] space-y-4 overflow-y-auto pr-1">
         <Field label="Brand name">
           <input
             type="text"
@@ -2119,23 +2191,6 @@ function BrandSheet({
         </button>
       </div>
     </EditSheet>
-  );
-}
-
-function RailBlock({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.13em] text-[#6f6f78]">
-        {label}
-      </p>
-      {children}
-    </div>
   );
 }
 
