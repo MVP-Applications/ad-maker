@@ -11,8 +11,11 @@ export const AD_PRIMARY_MODEL_COUNT = 3 as const;
  * AD_PRODUCT_CONCEPT_MAX of them; the rest exist so the person can choose which,
  * which is impossible when the catalog is truncated to the number we happened to
  * pick automatically.
+ *
+ * Sized against real shops rather than a round number: allbirds.com publishes
+ * 291 products and the extractor returns every one of them.
  */
-export const AD_CATALOG_MAX = 24 as const;
+export const AD_CATALOG_MAX = 300 as const;
 
 export const AD_RUN_LIMITS = {
   domain: 253,
@@ -34,4 +37,12 @@ export const AD_RUN_LIMITS = {
   subheadlineWords: 12,
   productName: 120,
   productDescription: 500,
+  /** The shop's own price, guarding against a parse that returned nonsense. */
+  price: 1_000_000,
+  currency: 8,
+  productUrl: 2048,
+  /** The brand's own headline, which is a sentence rather than ad copy. */
+  brandHeadline: 300,
+  language: 16,
+  languages: 12,
 } as const;

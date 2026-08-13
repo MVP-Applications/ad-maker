@@ -17,18 +17,38 @@ const PRODUCTS: Product[] = [
     name: "Payment Links",
     description: "Create a payment page and share its link with customers.",
     imageUrl: null,
+    price: null,
+    currency: null,
+    url: null,
+    flagship: true,
   },
   {
     name: "Stripe Billing",
     description: "Manage subscriptions, invoices, and recurring revenue.",
     imageUrl: null,
+    price: null,
+    currency: null,
+    url: null,
+    flagship: true,
   },
   {
     name: "Stripe Checkout",
     description: "Use a prebuilt payment form for online purchases.",
     imageUrl: null,
+    price: null,
+    currency: null,
+    url: null,
+    flagship: true,
   },
 ];
+
+/** A Concept subject carries only what an ad may show, never a price or a URL. */
+const subjectOf = (product: Product) => ({
+  kind: "product" as const,
+  name: product.name,
+  description: product.description,
+  imageUrl: product.imageUrl,
+});
 
 const CONCEPTS: readonly PlannedConcept[] = [
   {
@@ -55,21 +75,21 @@ const CONCEPTS: readonly PlannedConcept[] = [
   {
     key: "macro_material",
     model: "openai/gpt-image-2",
-    subject: { kind: "product", ...PRODUCTS[0] },
+    subject: subjectOf(PRODUCTS[0]),
     headline: "Share. Sell. Done.",
     subheadline: "Launch a payment page from one simple link",
   },
   {
     key: "gradient_field",
     model: "fal/fal-ai/nano-banana-pro",
-    subject: { kind: "product", ...PRODUCTS[1] },
+    subject: subjectOf(PRODUCTS[1]),
     headline: "Billing That Grows",
     subheadline: "Subscriptions and invoices built to scale",
   },
   {
     key: "editorial_spread",
     model: "fal/fal-ai/bytedance/seedream/v4.5/text-to-image",
-    subject: { kind: "product", ...PRODUCTS[2] },
+    subject: subjectOf(PRODUCTS[2]),
     headline: "Checkout, Simplified",
     subheadline: "A prebuilt payment form customers recognize",
   },
@@ -82,6 +102,7 @@ const BRAND: BrandProfile = {
   slogan: "Grow your revenue",
   industry: "Technology · Payments",
   logoUrl: "https://cdn.stripe.com/logo.png",
+  heroImageUrl: null,
 };
 
 const STYLEGUIDE: StyleguideProfile = {
@@ -97,6 +118,7 @@ const RESEARCH: BrandResearch = {
   brand: BRAND,
   styleguide: STYLEGUIDE,
   summary: "Stripe helps businesses accept online payments around the world.",
+  languages: ["en", "fr"],
   products: PRODUCTS,
 };
 
@@ -105,6 +127,7 @@ const BRIEF: AdBrief = {
   domain: "stripe.com",
   brandName: "Stripe",
   description: "Financial infrastructure for the internet.",
+  headline: "Grow your revenue",
   industry: "Technology · Payments",
   summary: "Stripe helps businesses accept online payments around the world.",
   mood: "bold, precise, optimistic",
@@ -112,6 +135,8 @@ const BRIEF: AdBrief = {
   colorA: "rich indigo",
   colorB: "deep navy",
   logoUrl: "https://cdn.stripe.com/logo.png",
+  heroImageUrl: null,
+  languages: ["en", "fr"],
   colors: [
     { hex: "#635bff", name: "Blurple" },
     { hex: "#0a2540", name: "Navy" },
@@ -261,10 +286,14 @@ describe("createBriefResearcher", () => {
   // The catalog is what a person chooses from, so it is carried whole rather
   // than cut to the number of Product slots an Ad Run happens to have.
   it("carries a catalog longer than one Ad Run can advertise", async () => {
-    const catalog = Array.from({ length: 8 }, (_, index) => ({
+    const catalog: Product[] = Array.from({ length: 8 }, (_, index) => ({
       name: `Product ${index + 1}`,
       description: `Description for product number ${index + 1}.`,
       imageUrl: null,
+      price: 10 + index,
+      currency: "USD",
+      url: null,
+      flagship: index < 3,
     }));
     const deps = adapters({ doResearch: researching({ products: catalog }) });
 
@@ -273,6 +302,7 @@ describe("createBriefResearcher", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.products).toEqual(catalog);
+    expect(result.value.products.filter(({ flagship }) => flagship)).toHaveLength(3);
   });
 
   // The research service reports why it could not answer, and each reason
@@ -376,7 +406,7 @@ describe("createConceptPlanner", () => {
       result.value.concepts.slice(0, 3).map(({ subject }) => subject),
     ).toEqual([{ kind: "company" }, { kind: "company" }, { kind: "company" }]);
     expect(result.value.concepts.slice(3).map(({ subject }) => subject)).toEqual(
-      PRODUCTS.map((product) => ({ kind: "product", ...product })),
+      PRODUCTS.map(subjectOf),
     );
     expect(deps.planConcepts).toHaveBeenCalledWith(BRIEF, PRODUCTS, undefined);
   });
@@ -390,11 +420,19 @@ describe("createConceptPlanner", () => {
         name: "Stripe Radar",
         description: "Block fraud with machine learning built into payments.",
         imageUrl: null,
+        price: null,
+        currency: null,
+        url: null,
+        flagship: true,
       },
       {
         name: "Stripe Terminal",
         description: "Accept in-person payments with programmable readers.",
         imageUrl: null,
+        price: null,
+        currency: null,
+        url: null,
+        flagship: true,
       },
     ];
     const deps = adapters();

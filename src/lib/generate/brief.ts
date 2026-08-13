@@ -7,6 +7,7 @@ import {
   AD_RUN_LIMITS,
 } from "../ad-run-policy";
 import {
+  advertised,
   type AdBrief,
   type PlannedConcept,
   type Product,
@@ -340,7 +341,9 @@ export async function pickConceptsAndCraftCopy(
       return {
         ...pick,
         model: productModels[index],
-        subject: { kind: "product" as const, ...product },
+        // Only what an ad may carry: a price or a shop URL has no business in
+        // the canonical URL of a rendered image.
+        subject: { kind: "product" as const, ...advertised(product) },
       };
     }),
   ]);

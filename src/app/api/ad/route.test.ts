@@ -13,6 +13,7 @@ const brief: AdBrief = {
   domain: "stripe.com",
   brandName: "Stripe",
   description: "Financial infrastructure for the internet.",
+  headline: "Payments infrastructure for the internet.",
   industry: "Technology · Payments",
   summary: "Stripe provides programmable financial services.",
   mood: "modern, confident, premium",
@@ -20,6 +21,8 @@ const brief: AdBrief = {
   colorA: "vivid violet",
   colorB: "deep navy",
   logoUrl: "https://cdn.example/stripe.png",
+  heroImageUrl: null,
+  languages: ["en"],
   colors: [],
 };
 

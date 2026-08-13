@@ -8,7 +8,7 @@ vi.mock("ai", async (importOriginal) => {
 });
 
 import type { LanguageModel } from "ai";
-import type { AdBrief, PlannedConcept, Product } from "@/lib/ad-run";
+import { advertised, type AdBrief, type PlannedConcept, type Product } from "@/lib/ad-run";
 import { isPhotoSafe } from "./directions";
 import { imageModelById, takesProductPhoto } from "./models";
 import { deriveSummaryFromMarkdown, pickConceptsAndCraftCopy } from "./brief";
@@ -17,6 +17,7 @@ const brief: AdBrief = {
   domain: "stripe.com",
   brandName: "Stripe",
   description: "Financial infrastructure for the internet.",
+  headline: "Payments infrastructure for the internet.",
   industry: "Technology · Payments",
   summary: "Stripe helps businesses accept payments and grow revenue.",
   mood: "bold, precise, optimistic",
@@ -24,6 +25,8 @@ const brief: AdBrief = {
   colorA: "rich indigo",
   colorB: "deep navy",
   logoUrl: null,
+  heroImageUrl: null,
+  languages: ["en"],
   colors: [{ hex: "#635bff", name: "Purple" }],
 };
 
@@ -32,16 +35,28 @@ const PRODUCTS: readonly Product[] = [
     name: "Payment Links",
     description: "Create a payment page and share its link with customers.",
     imageUrl: null,
+    price: null,
+    currency: null,
+    url: null,
+    flagship: true,
   },
   {
     name: "Stripe Billing",
     description: "Manage subscriptions, invoices, and recurring revenue.",
     imageUrl: null,
+    price: null,
+    currency: null,
+    url: null,
+    flagship: true,
   },
   {
     name: "Stripe Checkout",
     description: "Use a prebuilt payment form for online purchases.",
     imageUrl: null,
+    price: null,
+    currency: null,
+    url: null,
+    flagship: true,
   },
 ];
 
@@ -140,7 +155,7 @@ describe("Brief concept planning", () => {
 
       const productConcepts = concepts.slice(3);
       expect(productConcepts.map(({ subject }) => subject)).toEqual(
-        products.map((product) => ({ kind: "product", ...product })),
+        products.map((product) => ({ kind: "product", ...advertised(product) })),
       );
       expect(
         productConcepts.every(
@@ -198,7 +213,7 @@ describe("Brief concept planning", () => {
     expect(concepts.slice(0, 3).every(({ subject }) => subject.kind === "company"))
       .toBe(true);
     expect(concepts.slice(3).map(({ subject }) => subject)).toEqual(
-      products.map((product) => ({ kind: "product", ...product })),
+      products.map((product) => ({ kind: "product", ...advertised(product) })),
     );
 
     const generatedCompany = concepts.find(({ key }) => key === "typographic");
@@ -209,14 +224,14 @@ describe("Brief concept planning", () => {
     const fallbackProduct = concepts[3];
     expect(fallbackProduct.subject).toEqual({
       kind: "product",
-      ...products[0],
+      ...advertised(products[0]),
     });
     expect(fallbackProduct.headline).toBe("Payment Links");
 
     const generatedProduct = concepts[4];
     expect(generatedProduct).toMatchObject({
       key: "macro_material",
-      subject: { kind: "product", ...products[1] },
+      subject: { kind: "product", ...advertised(products[1]) },
       headline: "Automate every recurring",
     });
     expect(generatedProduct.subheadline.split(/\s+/)).toHaveLength(12);
@@ -243,6 +258,10 @@ describe("Brief concept planning", () => {
           name: "Stripe Tax",
           description: "Automate sales tax calculations and collection.",
           imageUrl: null,
+          price: null,
+          currency: null,
+          url: null,
+          flagship: true,
         },
       ] as Product[],
     ],

@@ -16,6 +16,7 @@ const brief: AdRunBrief["brief"] = {
   domain: "stripe.com",
   brandName: "Stripe",
   description: "Financial infrastructure for the internet.",
+  headline: "Payments infrastructure for the internet.",
   industry: "Technology · Payments",
   summary: "Stripe provides programmable financial services.",
   mood: "modern, confident, premium",
@@ -23,6 +24,8 @@ const brief: AdRunBrief["brief"] = {
   colorA: "rich indigo",
   colorB: "deep navy",
   logoUrl: null,
+  heroImageUrl: null,
+  languages: ["en"],
   colors: [{ hex: "#635bff", name: "Purple" }],
 };
 
@@ -33,6 +36,10 @@ const adRunBrief: AdRunBrief = {
       name: "Payments",
       description: "Accept payments online and in person.",
       imageUrl: null,
+      price: null,
+      currency: null,
+      url: null,
+      flagship: true,
     },
   ],
 };
@@ -50,6 +57,10 @@ const plan: AdRunPlan = {
             name: "Payments",
             description: "Accept payments online and in person.",
             imageUrl: null,
+            price: null,
+            currency: null,
+            url: null,
+            flagship: true,
           },
     headline: `Concept ${index + 1}`,
     subheadline: "A concise supporting line",

@@ -125,6 +125,7 @@ function buildBrief(
   domain: string,
   brand: BrandProfile,
   summary: string,
+  languages: readonly string[],
   styleguide: StyleguideProfile,
 ): AdBrief {
   const colors = boundedColors(styleguide.colors);
@@ -138,6 +139,7 @@ function buildBrief(
     domain,
     brandName,
     description,
+    headline: bounded(brand.slogan, AD_RUN_LIMITS.brandHeadline),
     industry: bounded(brand.industry, AD_RUN_LIMITS.industry),
     summary: deriveSummaryFromMarkdown(summary),
     mood: bounded(styleguide.mood, AD_RUN_LIMITS.mood) || DEFAULT_MOOD,
@@ -145,6 +147,13 @@ function buildBrief(
     colorA: bounded(colorA, AD_RUN_LIMITS.promptColor),
     colorB: bounded(colorB, AD_RUN_LIMITS.promptColor),
     logoUrl: boundedLogoUrl(brand.logoUrl),
+    heroImageUrl: boundedLogoUrl(brand.heroImageUrl),
+    languages: languages
+      .flatMap((language) => {
+        const tag = bounded(language, AD_RUN_LIMITS.language);
+        return tag ? [tag] : [];
+      })
+      .slice(0, AD_RUN_LIMITS.languages),
     colors,
   };
 }
@@ -187,6 +196,7 @@ export function createBriefResearcher(
         domain,
         research.brand,
         research.summary,
+        research.languages,
         research.styleguide,
       );
 
@@ -204,10 +214,10 @@ export function createBriefResearcher(
 /**
  * Brief -> three Company concepts plus one to three Product concepts.
  *
- * The catalog can now be longer than an Ad Run, so the Products it advertises
- * are taken from the front of the list — the shop's own order, which is how the
- * extractor ranks them. A person's choice replaces that cut later; until then
- * this reproduces exactly what the single planning call used to do.
+ * The catalog runs to hundreds; an Ad Run advertises at most three. Those three
+ * are the flagships — the shortlist the extractor judged worth advertising —
+ * rather than whichever entries the shop happens to list first. A person's
+ * choice replaces that shortlist later.
  */
 export function createConceptPlanner(
   adapters: Pick<AdRunPlannerAdapters, "concepts">,
@@ -221,9 +231,12 @@ export function createConceptPlanner(
       }
 
       const { brief, products } = decodeAdRunBrief(input);
+      const advertised = products
+        .filter(({ flagship }) => flagship)
+        .slice(0, AD_PRODUCT_CONCEPT_MAX);
       const concepts = await adapters.concepts.planConcepts(
         brief,
-        products.slice(0, AD_PRODUCT_CONCEPT_MAX),
+        advertised,
         signal,
       );
       if (signal?.aborted) return { ok: false, error: { code: "aborted" } };

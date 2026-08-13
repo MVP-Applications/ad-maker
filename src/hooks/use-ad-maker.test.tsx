@@ -29,16 +29,28 @@ function planFor(
       name: "Payments",
       description: "Programmable payment acceptance for internet businesses.",
       imageUrl: null,
+      price: null,
+      currency: null,
+      url: null,
+      flagship: true,
     },
     {
       name: "Billing",
       description: "Subscription and invoicing tools for recurring revenue.",
       imageUrl: null,
+      price: null,
+      currency: null,
+      url: null,
+      flagship: true,
     },
     {
       name: "Connect",
       description: "Payments infrastructure for platforms and marketplaces.",
       imageUrl: null,
+      price: null,
+      currency: null,
+      url: null,
+      flagship: true,
     },
   ] as const;
   const concepts: PlannedConcept[] = CREATIVE_DIRECTIONS.slice(
@@ -68,6 +80,7 @@ function planFor(
       domain,
       brandName: "Stripe",
       description: "Financial infrastructure for the internet.",
+  headline: "Payments infrastructure for the internet.",
       industry: "Technology · Payments",
       summary: "Stripe provides programmable financial services.",
       mood: "modern, confident, premium",
@@ -75,6 +88,8 @@ function planFor(
       colorA: "vivid violet",
       colorB: "deep navy",
       logoUrl: null,
+      heroImageUrl: null,
+      languages: ["en"],
       colors: [{ hex: "#635bff", name: "Purple" }],
     },
     concepts,
@@ -92,6 +107,10 @@ function briefFor(plan: AdRunPlan): AdRunBrief {
               name: subject.name,
               description: subject.description,
               imageUrl: subject.imageUrl,
+              price: 99,
+              currency: "USD",
+              url: null,
+              flagship: true,
             },
           ]
         : [],
@@ -184,7 +203,7 @@ describe("useAdMaker", () => {
     await startAndGenerate(result, "HTTPS://WWW.Stripe.COM/Pricing");
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "/api/brief?domain=stripe.com&v=4",
+      "/api/brief?domain=stripe.com&v=5",
     );
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/concepts");
     const generating = atPhase(result.current, "generating");
@@ -212,7 +231,7 @@ describe("useAdMaker", () => {
     expect(compose.error).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "/api/brief?domain=stripe.com&v=4",
+      "/api/brief?domain=stripe.com&v=5",
     );
 
     await act(() => compose.generate());

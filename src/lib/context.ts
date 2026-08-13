@@ -7,6 +7,7 @@ import { normalizeFontFamily } from "@/lib/font-family";
 import type { Product } from "@/lib/ad-run";
 import {
   AD_CATALOG_MAX,
+  AD_PRODUCT_CONCEPT_MAX,
   AD_PRODUCT_CONCEPT_MIN,
   AD_RUN_LIMITS,
 } from "@/lib/ad-run-policy";
@@ -44,6 +45,7 @@ export type BrandProfile = {
   slogan: string | null;
   industry: string | null;
   logoUrl: string | null;
+  heroImageUrl: string | null;
 };
 
 export type StyleguideProfile = {
@@ -59,6 +61,8 @@ export type BrandResearch = {
   brand: BrandProfile;
   styleguide: StyleguideProfile;
   summary: string;
+  /** Tags the site publishes itself in, as the site states them. */
+  languages: string[];
   products: ProductProfile[];
 };
 
@@ -79,6 +83,12 @@ const productSchema = z.object({
   name: z.string().nullish(),
   description: z.string().nullish(),
   images: z.array(z.string()).nullish(),
+  // Unknown rather than number: a shop that states "204.95" as a string, or as
+  // nothing at all, should cost that one product its price tag and not cost the
+  // whole extract its Brief. The numeric check lives in productFrom.
+  price: z.unknown(),
+  currency: z.string().nullish(),
+  url: z.string().nullish(),
 });
 
 const responseSchema = z.object({
@@ -90,12 +100,20 @@ const responseSchema = z.object({
       font: sourced(z.string()),
       headline: sourced(z.string()),
       description: sourced(z.string()),
+      hero_image: sourced(z.string()),
     })
     .partial()
     .nullish(),
+  // The whole catalogue, and the shortlist chosen out of it. Both are read:
+  // one is what a person picks from, the other is what a run advertises by
+  // default, and collapsing them loses whichever question is not being asked.
+  products: z.array(productSchema).nullish(),
   flagships: z.array(productSchema).nullish(),
   facts: z
-    .object({ sample_copy: z.array(z.string()).nullish() })
+    .object({
+      sample_copy: z.array(z.string()).nullish(),
+      languages: z.array(z.string()).nullish(),
+    })
     .partial()
     .nullish(),
   profile: z
@@ -159,22 +177,71 @@ function logoFrom(value: string | null): string | null {
  * fields that shape a look are read from it. `competitors` names real third
  * parties on a guess and must never reach an ad.
  */
+/** One catalogue entry, or nothing when the shop states too little to use it. */
+function productFrom(
+  product: z.infer<typeof productSchema>,
+): Omit<Product, "flagship"> | null {
+  const name = (product.name ?? "").trim();
+  const description = (product.description ?? "").trim();
+  if (!name || !description) return null;
+
+  const price = product.price;
+  return {
+    name: name.slice(0, AD_RUN_LIMITS.productName),
+    description: description.slice(0, AD_RUN_LIMITS.productDescription),
+    // First image only: the extractor lists them in the shop's own order, so
+    // the first is the primary shot. Same public-URL rules as the logo.
+    imageUrl: logoFrom((product.images ?? [])[0] ?? null),
+    price:
+      typeof price === "number" &&
+      Number.isFinite(price) &&
+      price >= 0 &&
+      price <= AD_RUN_LIMITS.price
+        ? price
+        : null,
+    currency:
+      (product.currency ?? "").trim().slice(0, AD_RUN_LIMITS.currency) || null,
+    url: logoFrom(product.url ?? null),
+  };
+}
+
+const productKey = (name: string) => name.trim().toLocaleLowerCase();
+
 function researchFrom(domain: string, body: ExtractResponse): BrandResearch {
   const brand = body.brand ?? {};
-  const products = (body.flagships ?? []).flatMap((product) => {
-    const name = (product.name ?? "").trim();
-    const description = (product.description ?? "").trim();
-    if (!name || !description) return [];
-    return [{
-      name: name.slice(0, AD_RUN_LIMITS.productName),
-      description: description.slice(0, AD_RUN_LIMITS.productDescription),
-      // First image only: the extractor lists them in the shop's own order, so
-      // the first is the primary shot. Same public-URL rules as the logo.
-      imageUrl: logoFrom((product.images ?? [])[0] ?? null),
-    }];
-  });
 
-  if (products.length < AD_PRODUCT_CONCEPT_MIN) {
+  // The shortlist names which catalogue entries are worth advertising. Entries
+  // it names that the catalogue does not carry are kept anyway: a run needs
+  // Products more than the catalogue needs to be the only source of them.
+  const flagshipKeys = new Set(
+    (body.flagships ?? []).flatMap((product) => {
+      const name = (product.name ?? "").trim();
+      return name ? [productKey(name)] : [];
+    }),
+  );
+
+  const seen = new Set<string>();
+  const catalogue = [...(body.products ?? []), ...(body.flagships ?? [])]
+    .flatMap((raw) => {
+      const product = productFrom(raw);
+      if (!product) return [];
+      const key = productKey(product.name);
+      if (seen.has(key)) return [];
+      seen.add(key);
+      return [{ ...product, flagship: flagshipKeys.has(key) }];
+    })
+    .slice(0, AD_CATALOG_MAX);
+
+  // Nothing was shortlisted, so the run falls back to the head of the
+  // catalogue — the shop's own order, which is how it ranks itself.
+  const products = catalogue.some(({ flagship }) => flagship)
+    ? catalogue
+    : catalogue.map((product, index) => ({
+        ...product,
+        flagship: index < AD_PRODUCT_CONCEPT_MAX,
+      }));
+
+  if (products.filter(({ flagship }) => flagship).length < AD_PRODUCT_CONCEPT_MIN) {
     throw new BrandExtractorError(
       "no-products",
       `extractor returned ${products.length} advertisable products`,
@@ -189,6 +256,7 @@ function researchFrom(domain: string, body: ExtractResponse): BrandResearch {
       slogan: valueOf(brand.headline),
       industry: body.profile?.positioning?.trim() || null,
       logoUrl: logoFrom(valueOf(brand.logo)),
+      heroImageUrl: logoFrom(valueOf(brand.hero_image)),
     },
     styleguide: {
       mood: body.profile?.tone?.trim() || "",
@@ -196,9 +264,13 @@ function researchFrom(domain: string, body: ExtractResponse): BrandResearch {
       fontFamily: normalizeFontFamily(valueOf(brand.font)),
     },
     summary: (body.facts?.sample_copy ?? []).join(" ").trim(),
+    languages: (body.facts?.languages ?? []).flatMap((language) => {
+      const tag = language.trim().slice(0, AD_RUN_LIMITS.language);
+      return tag ? [tag] : [];
+    }).slice(0, AD_RUN_LIMITS.languages),
     // The whole catalog the extractor found, not the handful an Ad Run uses:
     // the person choosing a Product cannot pick one the Brief never carried.
-    products: products.slice(0, AD_CATALOG_MAX),
+    products,
   };
 }
 

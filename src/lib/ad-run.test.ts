@@ -18,6 +18,7 @@ const brief: AdBrief = {
   domain: "stripe.com",
   brandName: "Stripe",
   description: "Financial infrastructure for the internet.",
+  headline: "Payments infrastructure for the internet.",
   industry: "Technology · Payments",
   summary: "Stripe provides programmable financial services.",
   mood: "modern, confident, premium",
@@ -25,6 +26,8 @@ const brief: AdBrief = {
   colorA: "vivid violet",
   colorB: "deep navy",
   logoUrl: "https://cdn.example.com/stripe.png",
+  heroImageUrl: null,
+  languages: ["en"],
   colors: [{ hex: "#635bff", name: "Purple" }],
 };
 
@@ -83,6 +86,10 @@ const adRunBrief = (productCount = 3) => ({
     name: `Product ${index + 1}`,
     description: `What product number ${index + 1} does for a customer.`,
     imageUrl: null,
+    price: index % 2 ? 19.99 : null,
+    currency: index % 2 ? "USD" : null,
+    url: null,
+    flagship: index < 3,
   })),
 });
 
@@ -95,7 +102,14 @@ test("decodes a Brief carrying a catalog longer than one Ad Run", () => {
     name: "Product 1",
     description: "What product number 1 does for a customer.",
     imageUrl: null,
+    price: null,
+    currency: null,
+    url: null,
+    flagship: true,
   });
+  expect(decoded.products[1].price).toBe(19.99);
+  expect(decoded.products[1].currency).toBe("USD");
+  expect(decoded.products.filter(({ flagship }) => flagship)).toHaveLength(3);
 });
 
 // Nothing here asserts how many Products an Ad Run will use: that is the choice
@@ -280,7 +294,7 @@ test("rejects malformed non-subject Ad Run invariants", () => {
 
 test("builds the versioned canonical Brief href", () => {
   expect(briefHref("https://www.stripe.com/pricing")).toBe(
-    "/api/brief?domain=stripe.com&v=4",
+    "/api/brief?domain=stripe.com&v=5",
   );
 });
 

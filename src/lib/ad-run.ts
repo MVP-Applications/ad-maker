@@ -42,6 +42,8 @@ export type AdBrief = {
   domain: string;
   brandName: string;
   description: string;
+  /** The brand's own headline, in its words: a sentence, not ad copy. */
+  headline: string;
   industry: string;
   summary: string;
   mood: string;
@@ -49,10 +51,18 @@ export type AdBrief = {
   colorA: string;
   colorB: string;
   logoUrl: string | null;
+  heroImageUrl: string | null;
+  /** BCP-47-ish tags the site publishes itself in, first one first. */
+  languages: string[];
   colors: BrandColor[];
 };
 
-export type Product = {
+/**
+ * What an advertisement carries about a Product: what it shows, and what it may
+ * say. Deliberately narrower than a catalog entry — a price or a shop URL has
+ * no business travelling in the canonical URL of a rendered image.
+ */
+export type AdvertisedProduct = {
   name: string;
   description: string;
   /**
@@ -63,9 +73,23 @@ export type Product = {
   imageUrl: string | null;
 };
 
+/** One catalog entry: everything the shop states, for choosing between them. */
+export type Product = AdvertisedProduct & {
+  price: number | null;
+  currency: string | null;
+  /** The product's own page on the shop. */
+  url: string | null;
+  /**
+   * Whether the extractor judged this one worth advertising. An Ad Run's
+   * Products are drawn from these; the rest of the catalog exists to be picked
+   * from instead.
+   */
+  flagship: boolean;
+};
+
 export type ConceptSubject =
   | { kind: "company" }
-  | ({ kind: "product" } & Product);
+  | ({ kind: "product" } & AdvertisedProduct);
 
 export type PlannedConcept = {
   key: CreativeDirectionKey;
@@ -112,7 +136,7 @@ type RecordValue = Record<string, unknown>;
 
 const DIRECTIONS = new Set<string>(CREATIVE_DIRECTION_KEYS);
 const MODELS = new Set<string>(IMAGE_MODEL_IDS);
-const BRIEF_FORMAT_VERSION = "4";
+const BRIEF_FORMAT_VERSION = "5";
 
 function invalid(message: string): never {
   throw new Error(`Invalid Ad Run contract: ${message}`);
@@ -188,6 +212,7 @@ function decodeBrief(value: unknown): AdBrief {
       "domain",
       "brandName",
       "description",
+      "headline",
       "industry",
       "summary",
       "mood",
@@ -195,6 +220,8 @@ function decodeBrief(value: unknown): AdBrief {
       "colorA",
       "colorB",
       "logoUrl",
+      "heroImageUrl",
+      "languages",
       "colors",
     ],
     "brief",
@@ -202,6 +229,14 @@ function decodeBrief(value: unknown): AdBrief {
 
   if (!Array.isArray(brief.colors) || brief.colors.length > AD_RUN_LIMITS.palette) {
     invalid("brief.colors must contain at most eight colors");
+  }
+  if (
+    !Array.isArray(brief.languages) ||
+    brief.languages.length > AD_RUN_LIMITS.languages
+  ) {
+    invalid(
+      `brief.languages must contain at most ${AD_RUN_LIMITS.languages} tags`,
+    );
   }
 
   return {
@@ -213,6 +248,9 @@ function decodeBrief(value: unknown): AdBrief {
     }),
     description: text(brief.description, "brief.description", {
       max: AD_RUN_LIMITS.description,
+    }),
+    headline: text(brief.headline, "brief.headline", {
+      max: AD_RUN_LIMITS.brandHeadline,
     }),
     industry: text(brief.industry, "brief.industry", { max: AD_RUN_LIMITS.industry }),
     summary: text(brief.summary, "brief.summary", { max: AD_RUN_LIMITS.summary }),
@@ -236,6 +274,17 @@ function decodeBrief(value: unknown): AdBrief {
       trim: true,
     }),
     logoUrl: brief.logoUrl === null ? null : publicHttpUrl(brief.logoUrl, "brief.logoUrl"),
+    heroImageUrl:
+      brief.heroImageUrl === null
+        ? null
+        : publicHttpUrl(brief.heroImageUrl, "brief.heroImageUrl"),
+    languages: brief.languages.map((language, index) =>
+      text(language, `brief.languages[${index}]`, {
+        min: 1,
+        max: AD_RUN_LIMITS.language,
+        trim: true,
+      }),
+    ),
     colors: brief.colors.map(decodeColor),
   };
 }
@@ -258,8 +307,11 @@ function imageModel(value: unknown): ImageModelId {
   return model as ImageModelId;
 }
 
-/** The Product fields alone, shared by a catalog entry and a Concept subject. */
-function decodeProductFields(value: RecordValue, name: string): Product {
+/** What both a catalog entry and a Concept subject state about a Product. */
+function decodeAdvertisedProduct(
+  value: RecordValue,
+  name: string,
+): AdvertisedProduct {
   return {
     name: text(value.name, `${name}.name`, {
       min: 1,
@@ -278,10 +330,53 @@ function decodeProductFields(value: RecordValue, name: string): Product {
   };
 }
 
+function decodePrice(value: unknown, name: string): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    invalid(`${name} must be a finite number`);
+  }
+  // A negative or absurd price is a parse that went wrong, not a bargain.
+  if (value < 0 || value > AD_RUN_LIMITS.price) invalid(`${name} is out of range`);
+  return value;
+}
+
 function decodeProduct(value: unknown, name: string): Product {
   const product = record(value, name);
-  onlyKeys(product, ["name", "description", "imageUrl"], name);
-  return decodeProductFields(product, name);
+  onlyKeys(
+    product,
+    ["name", "description", "imageUrl", "price", "currency", "url", "flagship"],
+    name,
+  );
+  if (typeof product.flagship !== "boolean") {
+    invalid(`${name}.flagship must be a boolean`);
+  }
+
+  return {
+    ...decodeAdvertisedProduct(product, name),
+    price: decodePrice(product.price, `${name}.price`),
+    currency:
+      product.currency === null || product.currency === undefined
+        ? null
+        : text(product.currency, `${name}.currency`, {
+            min: 1,
+            max: AD_RUN_LIMITS.currency,
+            trim: true,
+          }),
+    url:
+      product.url === null || product.url === undefined
+        ? null
+        : publicHttpUrl(product.url, `${name}.url`),
+    flagship: product.flagship,
+  };
+}
+
+/** Strip a catalog entry back to what an advertisement may carry. */
+export function advertised(product: AdvertisedProduct): AdvertisedProduct {
+  return {
+    name: product.name,
+    description: product.description,
+    imageUrl: product.imageUrl,
+  };
 }
 
 function decodeSubject(value: unknown, name = "concept.subject"): ConceptSubject {
@@ -295,7 +390,7 @@ function decodeSubject(value: unknown, name = "concept.subject"): ConceptSubject
   if (kind !== "product") invalid(`${name}.kind is unknown`);
 
   onlyKeys(subject, ["kind", "name", "description", "imageUrl"], name);
-  return { kind, ...decodeProductFields(subject, name) };
+  return { kind, ...decodeAdvertisedProduct(subject, name) };
 }
 
 function decodeConcept(value: unknown): PlannedConcept {

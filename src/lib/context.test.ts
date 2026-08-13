@@ -62,6 +62,7 @@ describe("researchBrand", () => {
         slogan: "No Wires.",
         industry: "Customizable mechanical keyboards for gamers.",
         logoUrl: "https://cdn.shopify.com/nuphy.png",
+        heroImageUrl: null,
       },
       styleguide: {
         mood: "Modern, playful, slightly nerdy.",
@@ -73,9 +74,10 @@ describe("researchBrand", () => {
         fontFamily: "Roboto Condensed",
       },
       summary: "Ultra-slim low-profile keyboards.",
+      languages: [],
       products: [
-        { name: "NuPhy WH80", description: "Gaming keyboard, 500-hour battery.", imageUrl: null },
-        { name: "NuPhy Gem80", description: "TKL custom mechanical keyboard.", imageUrl: null },
+        { name: "NuPhy WH80", description: "Gaming keyboard, 500-hour battery.", imageUrl: null, price: 249.95, currency: null, url: null, flagship: true },
+        { name: "NuPhy Gem80", description: "TKL custom mechanical keyboard.", imageUrl: null, price: 204.95, currency: null, url: null, flagship: true },
       ],
     });
   });
@@ -121,7 +123,7 @@ describe("researchBrand", () => {
     const research = await researchBrand("nuphy.com");
 
     expect(research.products).toEqual([
-      { name: "NuPhy Gem80", description: "TKL custom mechanical keyboard.", imageUrl: null },
+      { name: "NuPhy Gem80", description: "TKL custom mechanical keyboard.", imageUrl: null, price: null, currency: null, url: null, flagship: true },
     ]);
   });
 
@@ -236,6 +238,122 @@ describe("researchBrand", () => {
 
     expect(research.products).toHaveLength(AD_CATALOG_MAX);
     expect(research.products[3].name).toBe("Product 4");
+  });
+
+  // `products` is the catalogue and `flagships` the shortlist chosen out of it.
+  // Both are read: one is what a person picks from, the other is what a run
+  // advertises, and collapsing them loses whichever question is not being asked.
+  it("reads the whole catalogue and marks the shortlist within it", async () => {
+    vi.stubGlobal("fetch", respond(extract({
+      products: Array.from({ length: 5 }, (_, index) => ({
+        name: `Keyboard ${index + 1}`,
+        description: `Mechanical keyboard number ${index + 1}.`,
+      })),
+      flagships: [
+        { name: "Keyboard 4", description: "Mechanical keyboard number 4." },
+        { name: "keyboard 2", description: "Mechanical keyboard number 2." },
+      ],
+    })));
+
+    const { products } = await researchBrand("nuphy.com");
+
+    expect(products).toHaveLength(5);
+    expect(products.map(({ name }) => name)).toEqual([
+      "Keyboard 1",
+      "Keyboard 2",
+      "Keyboard 3",
+      "Keyboard 4",
+      "Keyboard 5",
+    ]);
+    // Matched case-insensitively, and the shortlist adds no duplicate entry.
+    expect(
+      products.filter(({ flagship }) => flagship).map(({ name }) => name),
+    ).toEqual(["Keyboard 2", "Keyboard 4"]);
+  });
+
+  it("falls back to the head of the catalogue when nothing was shortlisted", async () => {
+    vi.stubGlobal("fetch", respond(extract({
+      products: Array.from({ length: 6 }, (_, index) => ({
+        name: `Keyboard ${index + 1}`,
+        description: `Mechanical keyboard number ${index + 1}.`,
+      })),
+      flagships: [],
+    })));
+
+    const { products } = await researchBrand("nuphy.com");
+
+    expect(products).toHaveLength(6);
+    expect(
+      products.filter(({ flagship }) => flagship).map(({ name }) => name),
+    ).toEqual(["Keyboard 1", "Keyboard 2", "Keyboard 3"]);
+  });
+
+  it("carries the shop's own price, currency and product page", async () => {
+    vi.stubGlobal("fetch", respond(extract({
+      flagships: [{
+        name: "NuPhy Gem80",
+        description: "TKL custom mechanical keyboard.",
+        price: 204.95,
+        currency: "USD",
+        url: "https://nuphy.com/products/gem80",
+      }],
+    })));
+
+    const [product] = (await researchBrand("nuphy.com")).products;
+
+    expect(product.price).toBe(204.95);
+    expect(product.currency).toBe("USD");
+    expect(product.url).toBe("https://nuphy.com/products/gem80");
+  });
+
+  it.each([
+    ["a negative price", -5],
+    ["a price beyond the shared ceiling", 5_000_000],
+    ["a price that is not a number", "204.95"],
+  ])("drops %s rather than showing it", async (_label, price) => {
+    vi.stubGlobal("fetch", respond(extract({
+      flagships: [{
+        name: "NuPhy Gem80",
+        description: "TKL custom mechanical keyboard.",
+        price,
+      }],
+    })));
+
+    const [product] = (await researchBrand("nuphy.com")).products;
+
+    expect(product.price).toBeNull();
+  });
+
+  it("does not forward a product page that is not a public http url", async () => {
+    vi.stubGlobal("fetch", respond(extract({
+      flagships: [{
+        name: "NuPhy Gem80",
+        description: "TKL custom mechanical keyboard.",
+        url: "javascript:alert(1)",
+      }],
+    })));
+
+    const [product] = (await researchBrand("nuphy.com")).products;
+
+    expect(product.url).toBeNull();
+  });
+
+  it("reads the languages the site publishes itself in, and its hero image", async () => {
+    vi.stubGlobal("fetch", respond(extract({
+      brand: {
+        ...extract().brand,
+        hero_image: { value: "https://cdn.shopify.com/hero.jpg" },
+      },
+      facts: {
+        sample_copy: ["Ultra-slim low-profile keyboards."],
+        languages: ["en", " ja ", "", "ko"],
+      },
+    })));
+
+    const research = await researchBrand("nuphy.com");
+
+    expect(research.languages).toEqual(["en", "ja", "ko"]);
+    expect(research.brand.heroImageUrl).toBe("https://cdn.shopify.com/hero.jpg");
   });
 
   it("reports a site it could not read separately from a service that is down", async () => {

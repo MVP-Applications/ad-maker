@@ -9,7 +9,7 @@ import { normalizeDomain } from "@/lib/net";
 export const maxDuration = 180;
 
 /**
- * GET /api/brief?domain=stripe.com&v=4
+ * GET /api/brief?domain=stripe.com&v=5
  *
  * One call to brand-extractor for brand data, palette, typography, and the
  * product catalogue. No concept is planned here: planning follows the choices

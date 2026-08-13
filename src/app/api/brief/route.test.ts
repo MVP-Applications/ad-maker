@@ -15,6 +15,7 @@ const adRunBrief: AdRunBrief = {
     domain: "stripe.com",
     brandName: "Stripe",
     description: "Financial infrastructure for the internet.",
+  headline: "Payments infrastructure for the internet.",
     industry: "Technology · Payments",
     summary: "Stripe provides programmable financial services.",
     mood: "modern, confident, premium",
@@ -22,6 +23,8 @@ const adRunBrief: AdRunBrief = {
     colorA: "rich indigo",
     colorB: "deep navy",
     logoUrl: null,
+    heroImageUrl: null,
+    languages: ["en"],
     colors: [{ hex: "#635bff", name: "Purple" }],
   },
   products: [
@@ -29,16 +32,24 @@ const adRunBrief: AdRunBrief = {
       name: "Payments",
       description: "Accept payments online and in person.",
       imageUrl: null,
+      price: null,
+      currency: null,
+      url: null,
+      flagship: true,
     },
     {
       name: "Billing",
       description: "Manage subscriptions and recurring revenue.",
       imageUrl: null,
+      price: null,
+      currency: null,
+      url: null,
+      flagship: true,
     },
   ],
 };
 
-const request = (domain = "stripe.com", version: string | null = "4") => {
+const request = (domain = "stripe.com", version: string | null = "5") => {
   const params = new URLSearchParams({ domain });
   if (version !== null) params.set("v", version);
   return new Request(`https://branda.test/api/brief?${params.toString()}`);
@@ -82,8 +93,8 @@ describe("GET /api/brief", () => {
 
   it.each([
     ["an unversioned request", "stripe.com", null],
-    ["an old format version", "stripe.com", "3"],
-    ["an equivalent domain", "HTTPS://WWW.Stripe.com/pricing", "4"],
+    ["an old format version", "stripe.com", "4"],
+    ["an equivalent domain", "HTTPS://WWW.Stripe.com/pricing", "5"],
   ] as const)(
     "redirects %s to the versioned canonical cache key before researching",
     async (_label, domain, version) => {
@@ -91,7 +102,7 @@ describe("GET /api/brief", () => {
 
       expect(response.status).toBe(308);
       expect(response.headers.get("location")).toBe(
-        "https://branda.test/api/brief?domain=stripe.com&v=4",
+        "https://branda.test/api/brief?domain=stripe.com&v=5",
       );
       expect(response.headers.get("cache-control")).toBe("no-store");
       expect(mocks.researchAdRunBrief).not.toHaveBeenCalled();
@@ -100,7 +111,7 @@ describe("GET /api/brief", () => {
 
   it.each([
     "/api/brief?domain=stripe.com&domain=linear.app",
-    "/api/brief?domain=stripe.com&v=4&v=4",
+    "/api/brief?domain=stripe.com&v=5&v=5",
     "/api/brief?domain=stripe.com&extra=true",
   ])("rejects ambiguous query %s", async (path) => {
     const response = await GET(new Request(new URL(path, "https://branda.test")));
