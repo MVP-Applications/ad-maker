@@ -51,6 +51,12 @@ export const AD_RUN_LIMITS = {
    * it cannot crowd out the brand and Product facts it sits beside.
    */
   instruction: 300,
+  /**
+   * The picture the planner wrote for one ad. Long enough for subject,
+   * lighting, camera and composition — the four things a scene needs — and
+   * short enough that a run of six still fits comfortably in six URLs.
+   */
+  scene: 900,
   language: 16,
   languages: 12,
 } as const;

@@ -19,6 +19,7 @@ const input = (overrides: Partial<PromptInput> = {}): PromptInput => ({
   headline: "Move money",
   subheadline: "Financial infrastructure for every business",
   showsPeople: false,
+  scene: "",
   ...overrides,
 });
 
@@ -74,6 +75,59 @@ describe("the buyer's request block", () => {
 describe("the direction's prompt", () => {
   test.each(CREATIVE_DIRECTION_KEYS)("carries no request in %s", (key) => {
     expect(buildConceptPrompt(key, input())).not.toContain("THE BUYER'S REQUEST");
+  });
+});
+
+// A Direction is a set of rules the planner writes to, so the picture differs
+// per ad. The paragraph it was distilled from is what a failed planning call
+// falls back to, and what every Ad Run used before the planner wrote pictures.
+describe("the written picture", () => {
+  const WRITTEN =
+    "A single amber bottle on wet slate, low mist, one cool key light from the left.";
+
+  test("replaces the direction's own paragraph when the planner wrote one", () => {
+    const prompt = buildConceptPrompt("product_hero", input({ scene: WRITTEN }));
+
+    expect(prompt).toContain(WRITTEN);
+    expect(prompt).not.toContain("seamless studio backdrop");
+  });
+
+  test("falls back to the direction's paragraph when it did not", () => {
+    const prompt = buildConceptPrompt("product_hero", input({ scene: "" }));
+
+    expect(prompt).toContain("seamless studio backdrop");
+  });
+
+  // Whichever way the picture arrived, the deterministic blocks stay: what may
+  // be written in the image, and what may never appear in it.
+  test.each(CREATIVE_DIRECTION_KEYS)(
+    "keeps the typography and hard rules in %s either way",
+    (key) => {
+      for (const scene of ["", WRITTEN]) {
+        const prompt = buildConceptPrompt(key, input({ scene }));
+        expect(prompt).toContain("TEXT IS THE #1 PRIORITY");
+        expect(prompt).toContain("HARD RULES:");
+        expect(prompt).toContain("Move money");
+        expect(prompt).toContain("Stripe");
+      }
+    },
+  );
+
+  test("still carries the brand and campaign focus", () => {
+    const prompt = buildConceptPrompt("collage", input({ scene: WRITTEN }));
+
+    expect(prompt).toContain("The brand: Stripe (stripe.com)");
+    expect(prompt).toContain("CAMPAIGN FOCUS");
+  });
+
+  test("still lifts the ban on people where the planner allowed it", () => {
+    const prompt = buildConceptPrompt(
+      "editorial_spread",
+      input({ scene: WRITTEN, showsPeople: true }),
+    );
+
+    expect(prompt).not.toContain(NO_PEOPLE);
+    expect(prompt).toContain(PEOPLE_ALLOWED);
   });
 });
 

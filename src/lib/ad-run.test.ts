@@ -66,6 +66,7 @@ const concepts: PlannedConcept[] = CREATIVE_DIRECTIONS.slice(0, 6).map(
     subheadline: "A concise supporting line",
     instruction: "",
     showsPeople: false,
+    scene: "",
   }),
 );
 
@@ -213,6 +214,7 @@ test("round-trips the buyer's request through the canonical ad href", () => {
     subject: { ...concepts[0].subject },
     instruction: "on a marble table beside dried roses",
     showsPeople: false,
+    scene: "",
   };
 
   const href = renderedAdHref(brief, asked);
@@ -250,12 +252,43 @@ test("omits both parameters when nothing was asked", () => {
   expect(decoded.showsPeople).toBe(false);
 });
 
+// The picture the planner wrote is the one thing that differs between two runs
+// of the same Direction, so it has to survive the only channel to the renderer.
+test("round-trips the written picture through the canonical ad href", () => {
+  const written: PlannedConcept = {
+    ...concepts[0],
+    subject: { ...concepts[0].subject },
+    scene: "A single amber bottle on wet slate, low mist, one cool key light.",
+  };
+
+  const decoded = decodeRenderedAdQuery(renderedAdHref(brief, written));
+
+  expect(decoded.scene).toBe(
+    "A single amber bottle on wet slate, low mist, one cool key light.",
+  );
+});
+
+test("omits the picture when the planner did not write one", () => {
+  const href = renderedAdHref(brief, concepts[0]);
+
+  expect(href).not.toContain("scene=");
+  expect(decodeRenderedAdQuery(href).scene).toBe("");
+});
+
+test("rejects a picture beyond the shared bound", () => {
+  const candidate = plan(4);
+  candidate.concepts[0].scene = "x".repeat(AD_RUN_LIMITS.scene + 1);
+
+  expect(() => decodeAdRunPlan(candidate)).toThrow();
+});
+
 test("round-trips a request written in Arabic", () => {
   const asked: PlannedConcept = {
     ...concepts[0],
     subject: { ...concepts[0].subject },
     instruction: "على طاولة رخامية بجانب ورود مجففة",
     showsPeople: false,
+    scene: "",
   };
 
   expect(

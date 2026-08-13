@@ -24,6 +24,7 @@ const query = (overrides: Partial<RenderedAdQuery> = {}): RenderedAdQuery => ({
   subheadline: "Financial infrastructure for every business",
   instruction: "",
   showsPeople: false,
+  scene: "",
   brandName: "Stripe",
   colorA: "vivid violet",
   colorB: "deep navy",

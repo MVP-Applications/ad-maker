@@ -74,6 +74,7 @@ function planFor(
       subheadline: "A concise supporting line",
       instruction: "",
       showsPeople: false,
+      scene: "",
     };
   });
 

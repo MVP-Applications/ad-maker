@@ -64,6 +64,7 @@ const plan: AdRunPlan = {
     subheadline: "A concise supporting line",
     instruction: "",
     showsPeople: false,
+    scene: "",
   })),
 };
 

@@ -27,6 +27,11 @@ export type PromptInput = {
    * itself is not here: it is appended after this prompt, by the renderer.
    */
   showsPeople: boolean;
+  /**
+   * The picture the planner wrote for this ad. Empty falls back to the
+   * Direction's own fixed paragraph.
+   */
+  scene: string;
 };
 
 function typography(p: PromptInput, opts?: { includeUrl?: boolean }): string {
@@ -208,7 +213,12 @@ const PROMPT_BUILDERS = {
 } satisfies Record<CreativeDirectionKey, PromptBuilder>;
 
 /**
- * The direction's prompt, without the buyer's request.
+ * The prompt for one ad, without the buyer's request.
+ *
+ * The picture comes from the planner, which wrote it for this ad against the
+ * Direction's rules. The Direction's own paragraph stands in when it did not —
+ * a failed planning call, or an Ad Run made before the planner wrote pictures —
+ * so a bad day costs variety and never an ad.
  *
  * The request is appended by the renderer instead, because only it knows
  * whether a reference image — and the fidelity block that comes with one — sits
@@ -220,5 +230,13 @@ export function buildConceptPrompt(
   key: CreativeDirectionKey,
   input: PromptInput,
 ): string {
-  return PROMPT_BUILDERS[key](input);
+  if (!input.scene) return PROMPT_BUILDERS[key](input);
+
+  return [
+    `A premium square 1:1 advertisement.`,
+    input.scene,
+    brandLine(input),
+    typography(input),
+    hardRules(input.showsPeople),
+  ].join("\n\n");
 }

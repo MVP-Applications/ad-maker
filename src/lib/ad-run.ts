@@ -98,6 +98,15 @@ export type PlannedConcept = {
   headline: string;
   subheadline: string;
   /**
+   * The picture this ad shows, written by the planner for this ad alone.
+   *
+   * A Creative Direction used to be a fixed paragraph; it is now a set of rules
+   * the planner writes to, so two runs of the same Direction describe different
+   * pictures. Empty when the planning call failed, and the Direction's original
+   * paragraph stands in — which is also every Ad Run made before this existed.
+   */
+  scene: string;
+  /**
    * What the person asked this run for, in their words, carried per Concept.
    *
    * Per Concept rather than per Ad Run because a Rendered Ad is generated from
@@ -137,6 +146,7 @@ export type RenderedAdQuery = {
   subject: ConceptSubject;
   headline: string;
   subheadline: string;
+  scene: string;
   instruction: string;
   showsPeople: boolean;
   brandName: string;
@@ -473,6 +483,7 @@ function decodeConcept(value: unknown): PlannedConcept {
       "subject",
       "headline",
       "subheadline",
+      "scene",
       "instruction",
       "showsPeople",
     ],
@@ -506,6 +517,15 @@ function decodeConcept(value: unknown): PlannedConcept {
     subject: decodeSubject(concept.subject),
     headline,
     subheadline,
+    // Absent means the planner did not write one, and the Direction's own
+    // paragraph stands in at render time.
+    scene:
+      concept.scene === undefined
+        ? ""
+        : text(concept.scene, "concept.scene", {
+            max: AD_RUN_LIMITS.scene,
+            trim: true,
+          }),
     // Absent means nothing was asked for, which is the whole history of Ad Runs
     // before the request box existed.
     instruction:
@@ -628,6 +648,7 @@ const RENDERED_AD_QUERY_KEYS = [
   "mood",
   "font",
   "logo",
+  "scene",
   "ask",
   "people",
 ] as const;
@@ -658,6 +679,7 @@ function encodeRenderedAdQuery(query: Omit<RenderedAdQuery, "canonicalHref">): s
   if (query.logoUrl) params.set("logo", query.logoUrl);
   // Absent rather than empty when nothing was asked, so a run made without the
   // request box keeps the URL — and the CDN entry — it has always had.
+  if (query.scene) params.set("scene", query.scene);
   if (query.instruction) params.set("ask", query.instruction);
   if (query.showsPeople) params.set("people", "1");
   return `/api/ad?${params.toString()}`;
@@ -684,6 +706,7 @@ export function renderedAdHref(brief: AdBrief, concept: PlannedConcept): string 
     subject: validConcept.subject,
     headline: validConcept.headline,
     subheadline: validConcept.subheadline,
+    scene: validConcept.scene,
     instruction: validConcept.instruction,
     showsPeople: validConcept.showsPeople,
     brandName: validBrief.brandName,
@@ -757,6 +780,9 @@ export function decodeRenderedAdQuery(input: URL | URLSearchParams | string): Re
     subject,
     headline: requiredParameter(params, "headline"),
     subheadline: requiredParameter(params, "sub"),
+    ...(params.has("scene")
+      ? { scene: requiredParameter(params, "scene") }
+      : {}),
     ...(params.has("ask")
       ? { instruction: requiredParameter(params, "ask") }
       : {}),
@@ -770,6 +796,7 @@ export function decodeRenderedAdQuery(input: URL | URLSearchParams | string): Re
     subject,
     headline: copy.headline,
     subheadline: copy.subheadline,
+    scene: copy.scene,
     instruction: copy.instruction,
     showsPeople: copy.showsPeople,
     brandName: text(requiredParameter(params, "name"), "name", {

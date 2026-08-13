@@ -163,6 +163,7 @@ export function createAdRenderer(dependencies: AdRendererDependencies): AdRender
         headline: query.headline,
         subheadline: query.subheadline,
         showsPeople: query.showsPeople,
+        scene: query.scene,
       };
       const basePrompt = buildConceptPrompt(query.concept, promptInput);
 

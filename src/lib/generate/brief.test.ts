@@ -119,6 +119,47 @@ describe("Brief concept planning", () => {
       expect(new Set(concepts.map(({ key }) => key)).size).toBe(concepts.length);
     });
 
+    // The picture is written for the direction the planner chose. Steering a
+    // slot onto a different one leaves that picture describing the direction it
+    // just gave up — an arcade grid does not become a hero shot because the
+    // label changed — so it is dropped and the new direction's paragraph stands.
+    it("drops a written picture from any slot whose direction it moved", async () => {
+      mocks.generateObject.mockResolvedValue({
+        object: {
+          companyPicks: ["monochrome_crop", "blueprint", "retro_arcade"].map(
+            (concept) => ({
+              concept,
+              headline: "One two three",
+              subheadline: "A supporting line for this concept",
+              showsPeople: false,
+              scene: `A picture written for ${concept}.`,
+            }),
+          ),
+          productPicks: ["data_viz", "collage"].map((concept) => ({
+            concept,
+            headline: "One two three",
+            subheadline: "A supporting line for this concept",
+            showsPeople: false,
+            scene: `A picture written for ${concept}.`,
+          })),
+        },
+      });
+
+      const concepts = await pickConceptsAndCraftCopy(
+        model,
+        brief,
+        photographed([0, 1]),
+        "",
+      );
+
+      for (const concept of concepts) {
+        if (!concept.scene) continue;
+        // A picture that survived must still name the direction it was written
+        // for; anything moved lost its picture rather than kept a wrong one.
+        expect(concept.scene).toBe(`A picture written for ${concept.key}.`);
+      }
+    });
+
     it("leaves a Product with no photograph on any direction", async () => {
       mocks.generateObject.mockRejectedValue(new Error("planner unavailable"));
 

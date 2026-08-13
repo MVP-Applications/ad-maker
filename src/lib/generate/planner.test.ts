@@ -65,6 +65,7 @@ const CONCEPTS: readonly PlannedConcept[] = [
     subheadline: "Payments built for internet businesses",
     instruction: "",
     showsPeople: false,
+    scene: "",
   },
   {
     key: "isometric",
@@ -74,6 +75,7 @@ const CONCEPTS: readonly PlannedConcept[] = [
     subheadline: "A financial platform for ambitious teams",
     instruction: "",
     showsPeople: false,
+    scene: "",
   },
   {
     key: "typographic",
@@ -83,6 +85,7 @@ const CONCEPTS: readonly PlannedConcept[] = [
     subheadline: "Tools that make online commerce simple",
     instruction: "",
     showsPeople: false,
+    scene: "",
   },
   {
     key: "macro_material",
@@ -92,6 +95,7 @@ const CONCEPTS: readonly PlannedConcept[] = [
     subheadline: "Launch a payment page from one simple link",
     instruction: "",
     showsPeople: false,
+    scene: "",
   },
   {
     key: "gradient_field",
@@ -101,6 +105,7 @@ const CONCEPTS: readonly PlannedConcept[] = [
     subheadline: "Subscriptions and invoices built to scale",
     instruction: "",
     showsPeople: false,
+    scene: "",
   },
   {
     key: "editorial_spread",
@@ -110,6 +115,7 @@ const CONCEPTS: readonly PlannedConcept[] = [
     subheadline: "A prebuilt payment form customers recognize",
     instruction: "",
     showsPeople: false,
+    scene: "",
   },
 ];
 
