@@ -49,6 +49,8 @@ type IdleController = {
 type BriefController = {
   phase: "brief";
   submittedDomain: string;
+  /** Seconds spent reading the site, counted rather than estimated. */
+  elapsed: number;
   reset(): void;
 };
 
@@ -559,17 +561,28 @@ export function useAdMaker(): AdMakerController {
   const isGenerating =
     state.stage === "gallery" &&
     state.slots.some((slot) => slot.status === "loading");
-  const activeEpoch = state.stage === "gallery" ? state.epoch : null;
+
+  /**
+   * Both waits are counted, and each restarts the clock. Reading the site is a
+   * 15-60s wait with nothing on screen to watch, which is exactly where a real
+   * count of seconds is worth more than an invented estimate of what remains.
+   */
+  const waitKey =
+    state.stage === "brief"
+      ? `brief:${state.epoch}`
+      : isGenerating
+        ? `gallery:${state.epoch}`
+        : null;
 
   useEffect(() => {
-    if (!isGenerating) return;
+    if (!waitKey) return;
     setElapsed(0);
     const timer = window.setInterval(
       () => setElapsed((seconds) => seconds + 1),
       1000,
     );
     return () => window.clearInterval(timer);
-  }, [activeEpoch, isGenerating]);
+  }, [waitKey]);
 
   useEffect(() => {
     if (!isGenerating) return;
@@ -595,6 +608,7 @@ export function useAdMaker(): AdMakerController {
     return {
       phase: "brief",
       submittedDomain: state.submittedDomain,
+      elapsed,
       reset,
     };
   }

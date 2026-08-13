@@ -18,14 +18,17 @@ import {
   type AdBrief,
 } from "@/lib/ad-run";
 import { directionByKey } from "@/lib/generate/directions";
+import { researchStage } from "@/lib/research-stages";
 import { imageModelById, takesProductPhoto } from "@/lib/generate/models";
 import type { AdMakerController, AdSlot } from "@/hooks/use-ad-maker";
 
 type IdleController = Extract<AdMakerController, { phase: "idle" }>;
+type BriefController = Extract<AdMakerController, { phase: "brief" }>;
 type ComposeController = Extract<AdMakerController, { phase: "compose" }>;
-type WorkspaceController = Exclude<
+/** The gallery and nothing else: every earlier phase now has its own screen. */
+type WorkspaceController = Extract<
   AdMakerController,
-  { phase: "idle" } | { phase: "compose" }
+  { phase: "generating" } | { phase: "done" }
 >;
 
 const EXAMPLE_DOMAINS = ["stripe.com", "linear.app", "notion.so", "vercel.com"];
@@ -53,6 +56,8 @@ export function AdMaker({ s }: { s: AdMakerController }) {
         <Header />
         {s.phase === "idle" ? (
           <Hero s={s} />
+        ) : s.phase === "brief" ? (
+          <Researching s={s} />
         ) : s.phase === "compose" ? (
           <Compose s={s} />
         ) : (
@@ -137,6 +142,58 @@ function Hero({ s }: { s: IdleController }) {
             ))}
           </div>
         </form>
+      </div>
+    </section>
+  );
+}
+
+/* ─────────────────── reading the site: the wait itself ─────────────────── */
+
+function Researching({ s }: { s: BriefController }) {
+  const stage = researchStage(s.elapsed);
+
+  return (
+    <section className="relative flex flex-1 flex-col justify-center overflow-hidden py-10">
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute left-1/2 top-[-6rem] h-72 w-72 -translate-x-1/2 rounded-full bg-brand-purple/30 blur-[120px] sm:animate-blob" />
+        <div className="absolute right-[8%] top-24 h-64 w-64 rounded-full bg-brand-blue/20 blur-[120px] sm:animate-blob [animation-delay:-4s]" />
+      </div>
+
+      <div className="mx-auto flex w-full max-w-xl flex-col items-center px-5 text-center">
+        <div className="w-full rounded-3xl border border-border bg-card p-8 shadow-card animate-fade-up">
+          <h1 className="text-gradient text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
+            Reading your brand
+          </h1>
+          <p className="mx-auto mt-3 max-w-sm text-balance text-[14px] leading-relaxed text-muted-foreground">
+            We&apos;re pulling the logo, colours, type and product catalogue
+            straight off your site. This usually takes under a minute.
+          </p>
+
+          <div
+            aria-live="polite"
+            className="mt-7 inline-flex items-center gap-2.5 rounded-full bg-background px-4 py-2.5 text-[13px] font-medium text-foreground ring-1 ring-border"
+          >
+            <span className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            {stage}
+          </div>
+
+          <div className="mt-7 flex items-center justify-center gap-2 border-t border-border pt-5 text-[13px] text-muted-foreground">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={`https://www.google.com/s2/favicons?sz=64&domain=${s.submittedDomain}`}
+              alt=""
+              className="size-4 rounded"
+            />
+            {s.submittedDomain}
+          </div>
+        </div>
+
+        <div className="mt-5 flex items-center gap-4 text-[12px] text-muted-foreground animate-fade-up [animation-delay:120ms]">
+          <span className="font-mono tabular-nums">{fmtElapsed(s.elapsed)}</span>
+          <button onClick={s.reset} className="btn-secondary h-8 px-3 text-[12px]">
+            <XIcon /> Cancel
+          </button>
+        </div>
       </div>
     </section>
   );
@@ -253,81 +310,53 @@ function Shimmer() {
 function Workspace({ s }: { s: WorkspaceController }) {
   const cleanDomain = s.submittedDomain;
   const generating = s.phase === "generating";
-  const total = s.phase === "brief" ? AD_RUN_MAX_SIZE : s.slots.length;
+  const total = s.slots.length;
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 px-5 py-8">
-      <BrandBar
-        brief={s.phase === "brief" ? null : s.brief}
-        cleanDomain={cleanDomain}
-        onReset={s.reset}
-      />
+      <BrandBar brief={s.brief} cleanDomain={cleanDomain} onReset={s.reset} />
 
-      {(s.phase === "brief" || generating) && (
+      {generating && (
         <div className="animate-fade-up rounded-2xl border border-border bg-card px-4 py-3.5 [animation-delay:80ms]">
           <div className="flex items-center gap-3">
             <span className="size-4 shrink-0 animate-spin rounded-full border-2 border-primary border-t-transparent" />
             <div className="min-w-0 flex-1">
               <p className="text-[13px] font-semibold text-foreground">
-                {s.phase === "brief"
-                  ? `Reading ${cleanDomain}…`
-                  : `Painting ${total} on-brand ads`}
+                Painting {total} on-brand ads
               </p>
               <p className="text-[11px] text-muted-foreground">
-                {s.phase === "brief"
-                  ? "Planning three company ads plus up to three product ads"
-                  : `Each ad lands the moment its model finishes · usually 1–3 min · keep this tab open`}
+                Each ad lands the moment its model finishes · usually 1–3 min ·
+                keep this tab open
               </p>
             </div>
-            {generating && (
-              <div className="hidden shrink-0 items-center gap-3 sm:flex">
-                <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
-                  {fmtElapsed(s.elapsed)}
-                </span>
-                <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-brand-washed ring-1 ring-primary/30">
-                  {s.doneCount}/{total}
-                </span>
-              </div>
-            )}
-          </div>
-          {generating && (
-            <div className="mt-3 h-1 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-brand-blue to-brand-purple transition-all duration-700"
-                style={{
-                  width: `${Math.max(6, (s.doneCount / total) * 100)}%`,
-                }}
-              />
+            <div className="hidden shrink-0 items-center gap-3 sm:flex">
+              <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
+                {fmtElapsed(s.elapsed)}
+              </span>
+              <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-brand-washed ring-1 ring-primary/30">
+                {s.doneCount}/{total}
+              </span>
             </div>
-          )}
+          </div>
+          <div className="mt-3 h-1 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-brand-blue to-brand-purple transition-all duration-700"
+              style={{ width: `${Math.max(6, (s.doneCount / total) * 100)}%` }}
+            />
+          </div>
         </div>
       )}
 
       <div className="grid grid-cols-1 gap-5 min-[480px]:grid-cols-2 lg:grid-cols-3">
-        {s.phase !== "brief"
-          ? s.slots.map((slot, i) => (
-              <AdCard
-                key={`${slot.concept.model}:${slot.concept.key}:${slot.concept.subject.kind}:${i}`}
-                slot={slot}
-                index={i}
-                onRetry={() => s.retrySlot(i)}
-                onDownload={() => s.downloadAd(i)}
-              />
-            ))
-          : Array.from({ length: AD_RUN_MAX_SIZE }, (_, i) => (
-              <div
-                key={i}
-                className="animate-fade-up overflow-hidden rounded-2xl border border-border bg-card"
-                style={{ animationDelay: `${120 + i * 60}ms` }}
-              >
-                <div className="relative h-10 border-b border-border">
-                  <Shimmer />
-                </div>
-                <div className="relative aspect-square">
-                  <Shimmer />
-                </div>
-              </div>
-            ))}
+        {s.slots.map((slot, i) => (
+          <AdCard
+            key={`${slot.concept.model}:${slot.concept.key}:${slot.concept.subject.kind}:${i}`}
+            slot={slot}
+            index={i}
+            onRetry={() => s.retrySlot(i)}
+            onDownload={() => s.downloadAd(i)}
+          />
+        ))}
       </div>
 
       {s.phase === "done" && (
