@@ -45,6 +45,18 @@ export const AD_RUN_LIMITS = {
   productUrl: 2048,
   /** The brand's own headline, which is a sentence rather than ad copy. */
   brandHeadline: 300,
+  /**
+   * What the person asked for, in their words. Long enough for a real request
+   * — "show it with a man walking through an airport" — and short enough that
+   * it cannot crowd out the brand and Product facts it sits beside.
+   */
+  instruction: 300,
+  /**
+   * The picture the planner wrote for one ad. Long enough for subject,
+   * lighting, camera and composition — the four things a scene needs — and
+   * short enough that a run of six still fits comfortably in six URLs.
+   */
+  scene: 900,
   language: 16,
   languages: 12,
 } as const;

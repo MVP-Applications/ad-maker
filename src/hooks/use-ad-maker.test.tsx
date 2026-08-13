@@ -72,6 +72,9 @@ function planFor(
             },
       headline: `Concept ${index + 1}`,
       subheadline: "A concise supporting line",
+      instruction: "",
+      showsPeople: false,
+      scene: "",
     };
   });
 

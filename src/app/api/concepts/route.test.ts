@@ -53,17 +53,18 @@ const plan: AdRunPlan = {
       index < 3
         ? { kind: "company" as const }
         : {
+            // A Concept subject carries only what an ad may show — no price,
+            // no shop URL, no shortlist mark.
             kind: "product" as const,
             name: "Payments",
             description: "Accept payments online and in person.",
             imageUrl: null,
-            price: null,
-            currency: null,
-            url: null,
-            flagship: true,
           },
     headline: `Concept ${index + 1}`,
     subheadline: "A concise supporting line",
+    instruction: "",
+    showsPeople: false,
+    scene: "",
   })),
 };
 
@@ -91,6 +92,33 @@ describe("POST /api/concepts", () => {
     expect(response.headers.get("cdn-cache-control")).toBe("no-store");
     expect(mocks.planAdRunConcepts).toHaveBeenCalledWith(
       adRunBrief,
+      expect.any(AbortSignal),
+    );
+  });
+
+  // The one field a person types. It rides alongside the Brief rather than
+  // inside it, because a Brief describes a shop and this describes one request.
+  it("forwards the buyer's request to the planner", async () => {
+    mocks.planAdRunConcepts.mockResolvedValue({ ok: true, value: plan });
+
+    const response = await POST(
+      post({ ...adRunBrief, instruction: "a man walking through an airport" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.planAdRunConcepts).toHaveBeenCalledWith(
+      { ...adRunBrief, instruction: "a man walking through an airport" },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("plans without one when the body omits it", async () => {
+    mocks.planAdRunConcepts.mockResolvedValue({ ok: true, value: plan });
+
+    await POST(post(adRunBrief));
+
+    expect(mocks.planAdRunConcepts).toHaveBeenCalledWith(
+      { ...adRunBrief, instruction: undefined },
       expect.any(AbortSignal),
     );
   });

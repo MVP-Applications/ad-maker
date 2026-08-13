@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AdBrief, AdRunBrief, PlannedConcept, Product } from "@/lib/ad-run";
+import {
+  AD_RUN_LIMITS,
+  type AdBrief,
+  type AdRunBrief,
+  type PlannedConcept,
+  type Product,
+} from "@/lib/ad-run";
 import {
   BrandExtractorError,
   type BrandProfile,
@@ -57,6 +63,9 @@ const CONCEPTS: readonly PlannedConcept[] = [
     subject: { kind: "company" },
     headline: "Move Faster",
     subheadline: "Payments built for internet businesses",
+    instruction: "",
+    showsPeople: false,
+    scene: "",
   },
   {
     key: "isometric",
@@ -64,6 +73,9 @@ const CONCEPTS: readonly PlannedConcept[] = [
     subject: { kind: "company" },
     headline: "Build Boldly",
     subheadline: "A financial platform for ambitious teams",
+    instruction: "",
+    showsPeople: false,
+    scene: "",
   },
   {
     key: "typographic",
@@ -71,6 +83,9 @@ const CONCEPTS: readonly PlannedConcept[] = [
     subject: { kind: "company" },
     headline: "Own Tomorrow",
     subheadline: "Tools that make online commerce simple",
+    instruction: "",
+    showsPeople: false,
+    scene: "",
   },
   {
     key: "macro_material",
@@ -78,6 +93,9 @@ const CONCEPTS: readonly PlannedConcept[] = [
     subject: subjectOf(PRODUCTS[0]),
     headline: "Share. Sell. Done.",
     subheadline: "Launch a payment page from one simple link",
+    instruction: "",
+    showsPeople: false,
+    scene: "",
   },
   {
     key: "gradient_field",
@@ -85,6 +103,9 @@ const CONCEPTS: readonly PlannedConcept[] = [
     subject: subjectOf(PRODUCTS[1]),
     headline: "Billing That Grows",
     subheadline: "Subscriptions and invoices built to scale",
+    instruction: "",
+    showsPeople: false,
+    scene: "",
   },
   {
     key: "editorial_spread",
@@ -92,6 +113,9 @@ const CONCEPTS: readonly PlannedConcept[] = [
     subject: subjectOf(PRODUCTS[2]),
     headline: "Checkout, Simplified",
     subheadline: "A prebuilt payment form customers recognize",
+    instruction: "",
+    showsPeople: false,
+    scene: "",
   },
 ];
 
@@ -408,7 +432,7 @@ describe("createConceptPlanner", () => {
     expect(result.value.concepts.slice(3).map(({ subject }) => subject)).toEqual(
       PRODUCTS.map(subjectOf),
     );
-    expect(deps.planConcepts).toHaveBeenCalledWith(BRIEF, PRODUCTS, undefined);
+    expect(deps.planConcepts).toHaveBeenCalledWith(BRIEF, PRODUCTS, "", undefined);
   });
 
   // An Ad Run advertises at most three Products; the rest of the catalog is
@@ -443,7 +467,53 @@ describe("createConceptPlanner", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(deps.planConcepts).toHaveBeenCalledWith(BRIEF, PRODUCTS, undefined);
+    expect(deps.planConcepts).toHaveBeenCalledWith(BRIEF, PRODUCTS, "", undefined);
+  });
+
+  // The request is the one field a person types, so it is the one field the
+  // Brief contract does not bound. The planner does it instead.
+  it("passes the buyer's request to concept planning", async () => {
+    const deps = adapters();
+
+    await createConceptPlanner(deps)({
+      ...AD_RUN_BRIEF,
+      instruction: "  a man walking through an airport  ",
+    });
+
+    expect(deps.planConcepts).toHaveBeenCalledWith(
+      BRIEF,
+      PRODUCTS,
+      "a man walking through an airport",
+      undefined,
+    );
+  });
+
+  it("bounds a request longer than the contract allows", async () => {
+    const deps = adapters();
+
+    await createConceptPlanner(deps)({
+      ...AD_RUN_BRIEF,
+      instruction: "x".repeat(AD_RUN_LIMITS.instruction + 50),
+    });
+
+    expect(deps.planConcepts).toHaveBeenCalledWith(
+      BRIEF,
+      PRODUCTS,
+      "x".repeat(AD_RUN_LIMITS.instruction),
+      undefined,
+    );
+  });
+
+  it.each([
+    ["absent", undefined],
+    ["not a string", 42],
+    ["only whitespace", "   "],
+  ])("plans on an empty request when it is %s", async (_label, instruction) => {
+    const deps = adapters();
+
+    await createConceptPlanner(deps)({ ...AD_RUN_BRIEF, instruction });
+
+    expect(deps.planConcepts).toHaveBeenCalledWith(BRIEF, PRODUCTS, "", undefined);
   });
 
   it("rejects a Brief that violates the shared contract", async () => {

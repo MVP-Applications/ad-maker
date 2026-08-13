@@ -1,7 +1,7 @@
 import { generateImage as generateImageWithAi } from "ai";
 import type { RenderedAdQuery } from "@/lib/ad-run";
 import { fetchPublicRaster, type PublicRaster } from "@/lib/public-raster";
-import { buildConceptPrompt } from "./concepts";
+import { buildConceptPrompt, buyerRequestBlock } from "./concepts";
 import {
   classifyGatewayImageError,
   falEditImage,
@@ -118,6 +118,10 @@ const PRODUCT_INSTRUCTION = (productName: string) =>
   [
     `The attached image is the REAL ${productName}. The product shown in this ad MUST be this exact article — match its silhouette, proportions, panel edges, materials, finish and markings faithfully. Study the reference and reproduce its geometry; never redesign it, never substitute a similar-looking product, and never invent surface details it does not have.`,
     `COLOUR OVERRIDE — this outranks the palette instructions above: the brand colours apply to the BACKGROUND, the lighting, and the TYPOGRAPHY only. The product itself keeps its own real colours and materials exactly as photographed. Do not tint, recolour, or restyle it to match the palette.`,
+    // Without this the block reads as "change nothing", and a scene the buyer
+    // asked for loses to it: the product came back faithful and the forest it
+    // was supposed to be standing in never appeared.
+    `SCOPE: everything above governs the PRODUCT ITSELF, not the picture around it. The setting, background, surface, props, atmosphere and camera are set elsewhere in this brief — build whatever scene is described there and place this exact article into it. Relighting the product to match that scene is correct; redrawing the product is not.`,
   ].join("\n\n");
 
 /** What one reference image is, and how its model takes it. */
@@ -158,6 +162,8 @@ export function createAdRenderer(dependencies: AdRendererDependencies): AdRender
         subject: query.subject,
         headline: query.headline,
         subheadline: query.subheadline,
+        showsPeople: query.showsPeople,
+        scene: query.scene,
       };
       const basePrompt = buildConceptPrompt(query.concept, promptInput);
 
@@ -197,10 +203,23 @@ export function createAdRenderer(dependencies: AdRendererDependencies): AdRender
         if (signal?.aborted) return { ok: false, error: { code: "aborted" } };
       }
 
+      /**
+       * Direction, then the reference's fidelity rules, then what the buyer
+       * asked for — last, because that is the position an image model weighs
+       * most and the request is the part a person will judge the result by.
+       */
+      const request = buyerRequestBlock(query.instruction);
+      const assemble = (withReference: boolean) =>
+        [
+          basePrompt,
+          withReference ? reference?.instruction : null,
+          request,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+
       let attachment: ImageAttachment | null = reference?.attachment ?? null;
-      let prompt = reference
-        ? `${basePrompt}\n\n${reference.instruction}`
-        : basePrompt;
+      let prompt = assemble(true);
       let logoDowngraded = false;
       let transientFailures = 0;
 
@@ -244,8 +263,10 @@ export function createAdRenderer(dependencies: AdRendererDependencies): AdRender
           attachment !== null &&
           !logoDowngraded
         ) {
+          // The image went; the fidelity rules that described it go with it.
+          // What the buyer asked for stays — it never depended on a reference.
           attachment = null;
-          prompt = basePrompt;
+          prompt = assemble(false);
           logoDowngraded = true;
           continue;
         }

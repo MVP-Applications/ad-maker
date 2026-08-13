@@ -88,6 +88,7 @@ describe("Brief concept planning", () => {
         model,
         brief,
         photographed([1]),
+        "",
       );
 
       // Only two of three Product-slot models accept a reference, so the one
@@ -105,6 +106,7 @@ describe("Brief concept planning", () => {
         model,
         brief,
         photographed([0, 1]),
+        "",
       );
 
       for (const concept of productSlots(concepts)) {
@@ -117,10 +119,56 @@ describe("Brief concept planning", () => {
       expect(new Set(concepts.map(({ key }) => key)).size).toBe(concepts.length);
     });
 
+    // The picture is written for the direction the planner chose. Steering a
+    // slot onto a different one leaves that picture describing the direction it
+    // just gave up — an arcade grid does not become a hero shot because the
+    // label changed — so it is dropped and the new direction's paragraph stands.
+    it("drops a written picture from any slot whose direction it moved", async () => {
+      mocks.generateObject.mockResolvedValue({
+        object: {
+          companyPicks: ["monochrome_crop", "blueprint", "retro_arcade"].map(
+            (concept) => ({
+              concept,
+              headline: "One two three",
+              subheadline: "A supporting line for this concept",
+              showsPeople: false,
+              scene: `A picture written for ${concept}.`,
+            }),
+          ),
+          productPicks: ["data_viz", "collage"].map((concept) => ({
+            concept,
+            headline: "One two three",
+            subheadline: "A supporting line for this concept",
+            showsPeople: false,
+            scene: `A picture written for ${concept}.`,
+          })),
+        },
+      });
+
+      const concepts = await pickConceptsAndCraftCopy(
+        model,
+        brief,
+        photographed([0, 1]),
+        "",
+      );
+
+      for (const concept of concepts) {
+        if (!concept.scene) continue;
+        // A picture that survived must still name the direction it was written
+        // for; anything moved lost its picture rather than kept a wrong one.
+        expect(concept.scene).toBe(`A picture written for ${concept.key}.`);
+      }
+    });
+
     it("leaves a Product with no photograph on any direction", async () => {
       mocks.generateObject.mockRejectedValue(new Error("planner unavailable"));
 
-      const concepts = await pickConceptsAndCraftCopy(model, brief, photographed([]));
+      const concepts = await pickConceptsAndCraftCopy(
+        model,
+        brief,
+        photographed([]),
+        "",
+      );
 
       expect(concepts).toHaveLength(3 + PRODUCTS.length);
       expect(new Set(concepts.map(({ key }) => key)).size).toBe(concepts.length);
@@ -133,7 +181,7 @@ describe("Brief concept planning", () => {
       mocks.generateObject.mockRejectedValue(new Error("Gateway unavailable"));
       const products = PRODUCTS.slice(0, productCount);
 
-      const concepts = await pickConceptsAndCraftCopy(model, brief, products);
+      const concepts = await pickConceptsAndCraftCopy(model, brief, products, "");
 
       expect(concepts).toHaveLength(3 + productCount);
       expect(new Set(concepts.map(({ key }) => key)).size).toBe(
@@ -206,7 +254,7 @@ describe("Brief concept planning", () => {
     });
 
     const products = PRODUCTS.slice(0, 2);
-    const concepts = await pickConceptsAndCraftCopy(model, brief, products);
+    const concepts = await pickConceptsAndCraftCopy(model, brief, products, "");
 
     expect(concepts).toHaveLength(5);
     expect(new Set(concepts.map(({ key }) => key)).size).toBe(5);
@@ -267,7 +315,7 @@ describe("Brief concept planning", () => {
     ],
   ])("rejects a Product count outside the 1-3 contract", async (products) => {
     await expect(
-      pickConceptsAndCraftCopy(model, brief, products),
+      pickConceptsAndCraftCopy(model, brief, products, ""),
     ).rejects.toThrow("Concept planning requires 1-3 Products");
     expect(mocks.generateObject).not.toHaveBeenCalled();
   });

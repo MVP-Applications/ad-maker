@@ -22,6 +22,9 @@ const query = (overrides: Partial<RenderedAdQuery> = {}): RenderedAdQuery => ({
   subject: { kind: "company" },
   headline: "Move money",
   subheadline: "Financial infrastructure for every business",
+  instruction: "",
+  showsPeople: false,
+  scene: "",
   brandName: "Stripe",
   colorA: "vivid violet",
   colorB: "deep navy",
@@ -103,6 +106,92 @@ describe("Ad Renderer", () => {
 
       expect(vi.mocked(deps.generateImage).mock.calls[0][0].square).toEqual(square);
     }
+  });
+
+  // Ordering is the whole point: an image model weighs its last instruction
+  // most, and a Product ad's fidelity block reads as "change nothing". Behind
+  // it, a request to move the product into a forest produced a faithful product
+  // and no forest.
+  describe("the buyer's request", () => {
+    const PRODUCT = {
+      kind: "product" as const,
+      name: "Stripe Billing",
+      description: "Subscription billing and recurring revenue tools.",
+      imageUrl: "https://cdn.example.com/billing.png",
+    };
+    const promptOf = (deps: AdRendererDependencies) =>
+      vi.mocked(deps.generateImage).mock.calls[0][0].prompt;
+
+    it("comes after the Product fidelity rules, not before them", async () => {
+      const deps = dependencies();
+
+      await createAdRenderer(deps).render(
+        query({ subject: PRODUCT, instruction: "in a misty forest at dawn" }),
+      );
+
+      const prompt = promptOf(deps);
+      expect(prompt).toContain("in a misty forest at dawn");
+      expect(prompt.indexOf("THE BUYER'S REQUEST")).toBeGreaterThan(
+        prompt.indexOf("The attached image is the REAL"),
+      );
+    });
+
+    it("comes after the logo rules on a Company ad", async () => {
+      const deps = dependencies();
+
+      await createAdRenderer(deps).render(
+        query({ instruction: "in a misty forest at dawn" }),
+      );
+
+      const prompt = promptOf(deps);
+      expect(prompt.indexOf("THE BUYER'S REQUEST")).toBeGreaterThan(
+        prompt.indexOf("REAL logo mark"),
+      );
+    });
+
+    it("survives the downgrade when a model rejects the reference", async () => {
+      const deps = dependencies({
+        generateImage: vi
+          .fn()
+          .mockResolvedValueOnce({
+            ok: false,
+            error: { kind: "image_input_rejected" },
+          })
+          .mockResolvedValue(success()),
+      });
+
+      await createAdRenderer(deps).render(
+        query({ subject: PRODUCT, instruction: "in a misty forest at dawn" }),
+      );
+
+      // The image went, and the rules describing it went with it. The request
+      // never depended on a reference, so it stays.
+      const retried = vi.mocked(deps.generateImage).mock.calls[1][0].prompt;
+      expect(retried).toContain("in a misty forest at dawn");
+      expect(retried).not.toContain("The attached image is the REAL");
+    });
+
+    it("is absent from the prompt when nothing was asked", async () => {
+      const deps = dependencies();
+
+      await createAdRenderer(deps).render(query({ subject: PRODUCT }));
+
+      expect(promptOf(deps)).not.toContain("THE BUYER'S REQUEST");
+    });
+
+    // The fidelity block has to permit the scene, or it reads as a blanket
+    // refusal to change anything at all.
+    it("is met by fidelity rules that hand it the scene", async () => {
+      const deps = dependencies();
+
+      await createAdRenderer(deps).render(
+        query({ subject: PRODUCT, instruction: "in a misty forest at dawn" }),
+      );
+
+      const prompt = promptOf(deps);
+      expect(prompt).toContain("governs the PRODUCT ITSELF, not the picture around it");
+      expect(prompt).toContain("Relighting the product to match that scene is correct");
+    });
   });
 
   it("makes the selected Product the explicit campaign focus", async () => {
