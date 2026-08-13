@@ -83,6 +83,23 @@ type CatalogController = {
 };
 
 /**
+ * Everything the extract found about the brand itself, laid out to be checked
+ * before it reaches an advertisement. Read-only: the fields are shown so a
+ * wrong one is caught here rather than recognised in a finished ad.
+ */
+type DnaController = {
+  phase: "dna";
+  submittedDomain: string;
+  brief: AdBrief;
+  products: readonly Product[];
+  /** Every photograph the extract carries: the hero shot, then the catalogue. */
+  images: readonly string[];
+  confirmBrand(): void;
+  back(): void;
+  reset(): void;
+};
+
+/**
  * The Brief is read and nothing has been decided yet. The run waits here for
  * the choices that shape it; today the only one is whether to make it at all.
  */
@@ -124,6 +141,7 @@ export type AdMakerController =
   | IdleController
   | BriefController
   | CatalogController
+  | DnaController
   | ComposeController
   | GeneratingController
   | DoneController;
@@ -136,6 +154,15 @@ type InternalState =
       epoch: number;
       submittedDomain: string;
       adRunBrief: AdRunBrief;
+      selected: ReadonlySet<string>;
+    }
+  | {
+      stage: "dna";
+      epoch: number;
+      submittedDomain: string;
+      adRunBrief: AdRunBrief;
+      /** The catalogue as it stood before the cut, so Back can restore it. */
+      catalogue: AdRunBrief;
       selected: ReadonlySet<string>;
     }
   | {
@@ -453,13 +480,39 @@ export function useAdMaker(): AdMakerController {
     if (!kept.some(isAdvertisable)) return;
 
     commit({
-      stage: "compose",
+      stage: "dna",
       epoch: current.epoch,
       submittedDomain: current.submittedDomain,
       adRunBrief: {
         brief: current.adRunBrief.brief,
         products: withFlagships(kept),
       },
+      catalogue: current.adRunBrief,
+      selected: current.selected,
+    });
+  }, [commit]);
+
+  /** Back to the catalogue, with the selection that produced this cut intact. */
+  const backToCatalog = useCallback(() => {
+    const current = stateRef.current;
+    if (current.stage !== "dna") return;
+    commit({
+      stage: "catalog",
+      epoch: current.epoch,
+      submittedDomain: current.submittedDomain,
+      adRunBrief: current.catalogue,
+      selected: current.selected,
+    });
+  }, [commit]);
+
+  const confirmBrand = useCallback(() => {
+    const current = stateRef.current;
+    if (current.stage !== "dna") return;
+    commit({
+      stage: "compose",
+      epoch: current.epoch,
+      submittedDomain: current.submittedDomain,
+      adRunBrief: current.adRunBrief,
       planning: false,
       error: null,
     });
@@ -730,6 +783,25 @@ export function useAdMaker(): AdMakerController {
       selectAll,
       deselectAll,
       confirmSelection,
+      reset,
+    };
+  }
+  if (state.stage === "dna") {
+    const { brief, products } = state.adRunBrief;
+    // The hero shot first, then the catalogue's own photographs, each once.
+    const images = [
+      ...(brief.heroImageUrl ? [brief.heroImageUrl] : []),
+      ...products.flatMap(({ imageUrl }) => (imageUrl ? [imageUrl] : [])),
+    ].filter((url, index, all) => all.indexOf(url) === index);
+
+    return {
+      phase: "dna",
+      submittedDomain: state.submittedDomain,
+      brief,
+      products,
+      images,
+      confirmBrand,
+      back: backToCatalog,
       reset,
     };
   }

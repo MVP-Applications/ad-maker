@@ -27,6 +27,7 @@ import type { AdMakerController, AdSlot } from "@/hooks/use-ad-maker";
 type IdleController = Extract<AdMakerController, { phase: "idle" }>;
 type BriefController = Extract<AdMakerController, { phase: "brief" }>;
 type CatalogController = Extract<AdMakerController, { phase: "catalog" }>;
+type DnaController = Extract<AdMakerController, { phase: "dna" }>;
 type ComposeController = Extract<AdMakerController, { phase: "compose" }>;
 /** The gallery and nothing else: every earlier phase now has its own screen. */
 type WorkspaceController = Extract<
@@ -63,6 +64,8 @@ export function AdMaker({ s }: { s: AdMakerController }) {
           <Researching s={s} />
         ) : s.phase === "catalog" ? (
           <Catalog s={s} />
+        ) : s.phase === "dna" ? (
+          <BrandDna s={s} />
         ) : s.phase === "compose" ? (
           <Compose s={s} />
         ) : (
@@ -347,6 +350,199 @@ function Catalog({ s }: { s: CatalogController }) {
             className="btn-gradient disabled:cursor-not-allowed disabled:opacity-50"
           >
             Continue with {s.selectedCount} →
+          </button>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+/* ─────────────── what the extract found about the brand ─────────────── */
+
+/** "ja" -> "Japanese", using the platform's own table rather than a list here. */
+function languageName(tag: string): string {
+  try {
+    return new Intl.DisplayNames(["en"], { type: "language" }).of(tag) ?? tag;
+  } catch {
+    return tag;
+  }
+}
+
+function DnaCard({
+  label,
+  children,
+  className = "",
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`flex flex-col justify-between rounded-2xl border border-border bg-card p-4 ${className}`}
+    >
+      <div className="min-h-0 flex-1">{children}</div>
+      <p className="mt-3 text-[12px] text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
+function Thumbnails({
+  urls,
+  total,
+  alt,
+}: {
+  urls: readonly string[];
+  total: number;
+  alt: string;
+}) {
+  const shown = urls.slice(0, 3);
+  const rest = total - shown.length;
+
+  return (
+    <div className="flex items-center gap-2">
+      {shown.map((url) => (
+        <div
+          key={url}
+          className="size-14 shrink-0 overflow-hidden rounded-lg bg-brand-dark ring-1 ring-border"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={url}
+            alt={alt}
+            loading="lazy"
+            className="size-full object-cover"
+          />
+        </div>
+      ))}
+      {rest > 0 && (
+        <span className="grid size-14 shrink-0 place-items-center rounded-lg bg-muted text-[12px] font-semibold text-foreground ring-1 ring-border">
+          +{rest}
+        </span>
+      )}
+      {shown.length === 0 && (
+        <span className="text-[12px] text-muted-foreground">None found</span>
+      )}
+    </div>
+  );
+}
+
+function BrandDna({ s }: { s: DnaController }) {
+  const b = s.brief;
+  const primaryLanguage = b.languages[0] ?? null;
+
+  return (
+    <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-5 py-8 pb-28">
+      <div className="animate-fade-up text-center">
+        <h1 className="text-gradient text-3xl font-semibold tracking-tight">
+          Your brand
+        </h1>
+        <p className="mt-2 text-[14px] text-muted-foreground">
+          Everything we read off {s.submittedDomain}. Check it before it reaches
+          an ad.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <DnaCard label="Logo" className="col-span-2 row-span-2">
+          <div className="grid h-full min-h-[9rem] place-items-center rounded-xl bg-white p-6">
+            {b.logoUrl ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={b.logoUrl}
+                alt={`${b.brandName} logo`}
+                className="max-h-24 max-w-full object-contain"
+              />
+            ) : (
+              <span className="text-[12px] text-zinc-500">No logo found</span>
+            )}
+          </div>
+        </DnaCard>
+
+        <DnaCard label="Brand" className="col-span-2">
+          <p className="truncate text-2xl font-semibold text-foreground">
+            {b.brandName}
+          </p>
+          <p className="mt-1 truncate text-[13px] text-muted-foreground">
+            {b.domain}
+          </p>
+        </DnaCard>
+
+        <DnaCard label="Typography">
+          <p className="text-4xl font-semibold leading-none text-foreground">
+            Aa
+          </p>
+          <p className="mt-2 truncate text-[12px] text-muted-foreground">
+            {b.fontFamily ?? "Not stated"}
+          </p>
+        </DnaCard>
+
+        <DnaCard label="Language">
+          {primaryLanguage ? (
+            <div className="flex items-center gap-2">
+              <span className="rounded-md bg-muted px-2 py-1 text-[11px] font-semibold uppercase text-foreground ring-1 ring-border">
+                {primaryLanguage}
+              </span>
+              <span className="truncate text-[13px] text-foreground">
+                {languageName(primaryLanguage)}
+              </span>
+            </div>
+          ) : (
+            <p className="text-[13px] text-muted-foreground">Not stated</p>
+          )}
+          {b.languages.length > 1 && (
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              +{b.languages.length - 1} more on the site
+            </p>
+          )}
+        </DnaCard>
+
+        <DnaCard label="Colours" className="col-span-2">
+          {b.colors.length > 0 ? (
+            <div className="grid grid-cols-4 gap-2">
+              {b.colors.slice(0, 8).map((color, index) => (
+                <div
+                  key={`${color.hex}-${index}`}
+                  className="aspect-square rounded-lg ring-1 ring-border"
+                  style={{ background: color.hex }}
+                  title={`${color.name ?? "Colour"} · ${color.hex}`}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="text-[13px] text-muted-foreground">None found</p>
+          )}
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Ads use {b.colorA} and {b.colorB}
+          </p>
+        </DnaCard>
+
+        <DnaCard label="Headline" className="col-span-2">
+          <p className="text-[15px] leading-relaxed text-foreground">
+            {b.headline || b.description || "Not stated"}
+          </p>
+        </DnaCard>
+
+        <DnaCard label={`Products · ${s.products.length} kept`}>
+          <Thumbnails
+            urls={s.products.flatMap((p) => (p.imageUrl ? [p.imageUrl] : []))}
+            total={s.products.length}
+            alt=""
+          />
+        </DnaCard>
+
+        <DnaCard label={`Images · ${s.images.length} found`}>
+          <Thumbnails urls={s.images} total={s.images.length} alt="" />
+        </DnaCard>
+      </div>
+
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-background/90 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 px-5 py-3.5">
+          <button onClick={s.back} className="btn-secondary text-[13px]">
+            ← Back to products
+          </button>
+          <button onClick={s.confirmBrand} className="btn-gradient">
+            Continue →
           </button>
         </div>
       </div>

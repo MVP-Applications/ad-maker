@@ -164,6 +164,7 @@ async function startAndGenerate(
 ): Promise<void> {
   await act(() => atPhase(result.current, "idle").start(domain));
   act(() => atPhase(result.current, "catalog").confirmSelection());
+  act(() => atPhase(result.current, "dna").confirmBrand());
   await act(() => atPhase(result.current, "compose").generate());
 }
 
@@ -238,6 +239,8 @@ describe("useAdMaker", () => {
 
     act(() => catalog.confirmSelection());
 
+    act(() => atPhase(result.current, "dna").confirmBrand());
+
     const compose = atPhase(result.current, "compose");
     expect(compose.products).toEqual(briefFor(plan).products);
     expect(compose.planning).toBe(false);
@@ -268,8 +271,64 @@ describe("useAdMaker", () => {
 
     act(() => atPhase(result.current, "catalog").confirmSelection());
 
-    expect(atPhase(result.current, "compose").products.map(({ name }) => name))
+    expect(atPhase(result.current, "dna").products.map(({ name }) => name))
       .toEqual(["Billing"]);
+  });
+
+  // The cut is reversible: Back restores the catalogue and the selection that
+  // produced it, so a wrong choice costs a click and not the whole extract.
+  it("returns to the catalogue with the selection intact", async () => {
+    const plan = planFor();
+    const pendingAd = deferred<Response>();
+    fetchMock.mockImplementation((input) => {
+      const planning = planningResponse(plan, String(input));
+      return planning ? Promise.resolve(planning) : pendingAd.promise;
+    });
+    const { result } = renderHook(() => useAdMaker());
+
+    await act(() => atPhase(result.current, "idle").start("stripe.com"));
+    const total = atPhase(result.current, "catalog").products.length;
+    act(() => atPhase(result.current, "catalog").toggleProduct("Connect"));
+    act(() => atPhase(result.current, "catalog").confirmSelection());
+
+    expect(atPhase(result.current, "dna").products).toHaveLength(total - 1);
+
+    act(() => atPhase(result.current, "dna").back());
+
+    const catalog = atPhase(result.current, "catalog");
+    expect(catalog.products).toHaveLength(total);
+    expect(catalog.selectedCount).toBe(total - 1);
+  });
+
+  it("gathers the hero shot and the catalogue's photographs for review", async () => {
+    const plan = planFor();
+    const catalogue = briefFor(plan).products.map((product, index) => ({
+      ...product,
+      imageUrl: index === 2 ? null : `https://cdn.example.com/p${index}.png`,
+    }));
+    fetchMock.mockImplementation((input) => {
+      const href = String(input);
+      if (href.startsWith("/api/brief")) {
+        return Promise.resolve(
+          jsonResponse({
+            brief: { ...plan.brief, heroImageUrl: "https://cdn.example.com/hero.png" },
+            products: catalogue,
+          }),
+        );
+      }
+      return Promise.resolve(planningResponse(plan, href) ?? imageResponse());
+    });
+    const { result } = renderHook(() => useAdMaker());
+
+    await act(() => atPhase(result.current, "idle").start("stripe.com"));
+    act(() => atPhase(result.current, "catalog").confirmSelection());
+
+    // Hero first, then the catalogue's own, and never a Product without one.
+    expect(atPhase(result.current, "dna").images).toEqual([
+      "https://cdn.example.com/hero.png",
+      "https://cdn.example.com/p0.png",
+      "https://cdn.example.com/p1.png",
+    ]);
   });
 
   it("toggles a Product off and on, and restores the whole catalogue", async () => {
@@ -322,7 +381,7 @@ describe("useAdMaker", () => {
     act(() => atPhase(result.current, "catalog").toggleProduct("Connect"));
     act(() => atPhase(result.current, "catalog").confirmSelection());
 
-    const kept = atPhase(result.current, "compose").products;
+    const kept = atPhase(result.current, "dna").products;
     expect(kept.map(({ name }) => name)).toEqual(["Connect"]);
     expect(kept.every(({ flagship }) => flagship)).toBe(true);
   });
@@ -399,6 +458,7 @@ describe("useAdMaker", () => {
 
     await act(() => atPhase(result.current, "idle").start("stripe.com"));
     act(() => atPhase(result.current, "catalog").confirmSelection());
+    act(() => atPhase(result.current, "dna").confirmBrand());
     await act(() => atPhase(result.current, "compose").generate());
 
     const failed = atPhase(result.current, "compose");
@@ -427,6 +487,7 @@ describe("useAdMaker", () => {
 
     await act(() => atPhase(result.current, "idle").start("stripe.com"));
     act(() => atPhase(result.current, "catalog").confirmSelection());
+    act(() => atPhase(result.current, "dna").confirmBrand());
     const compose = atPhase(result.current, "compose");
     void compose.generate();
     await waitFor(() =>
@@ -475,6 +536,7 @@ describe("useAdMaker", () => {
 
     await act(() => atPhase(result.current, "idle").start("stripe.com"));
     act(() => atPhase(result.current, "catalog").confirmSelection());
+    act(() => atPhase(result.current, "dna").confirmBrand());
     await act(() => atPhase(result.current, "compose").generate());
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
