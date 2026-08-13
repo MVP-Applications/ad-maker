@@ -307,10 +307,19 @@ function imageModel(value: unknown): ImageModelId {
   return model as ImageModelId;
 }
 
-/** What both a catalog entry and a Concept subject state about a Product. */
+/**
+ * What both a catalog entry and a Concept subject state about a Product.
+ *
+ * `minDescription` is the whole difference between the two. An advertisement
+ * has to say something about what it is selling, so a Concept subject requires
+ * one. A catalog entry does not: a shop lists most of its range with a name, a
+ * photograph and a price and nothing else — nuphy.com describes 29 of its 680 —
+ * and every one of those is still a Product somebody can point at and choose.
+ */
 function decodeAdvertisedProduct(
   value: RecordValue,
   name: string,
+  minDescription: 0 | 1,
 ): AdvertisedProduct {
   return {
     name: text(value.name, `${name}.name`, {
@@ -319,7 +328,7 @@ function decodeAdvertisedProduct(
       trim: true,
     }),
     description: text(value.description, `${name}.description`, {
-      min: 1,
+      min: minDescription,
       max: AD_RUN_LIMITS.productDescription,
       trim: true,
     }),
@@ -352,7 +361,7 @@ function decodeProduct(value: unknown, name: string): Product {
   }
 
   return {
-    ...decodeAdvertisedProduct(product, name),
+    ...decodeAdvertisedProduct(product, name, 0),
     price: decodePrice(product.price, `${name}.price`),
     currency:
       product.currency === null || product.currency === undefined
@@ -379,6 +388,49 @@ export function advertised(product: AdvertisedProduct): AdvertisedProduct {
   };
 }
 
+/** Two Products are the same Product when their names match but for case. */
+export const productKey = (name: string) => name.trim().toLocaleLowerCase();
+
+/**
+ * Can an advertisement be written about this Product?
+ *
+ * Only if the shop says what it is. A name and a price are enough to choose a
+ * Product; they are not enough to write a truthful ad about one, and inventing
+ * the difference is the one thing this pipeline must never do.
+ */
+export function isAdvertisable(product: Product): boolean {
+  return product.description.trim().length > 0;
+}
+
+/**
+ * Guarantee a catalog has something to advertise.
+ *
+ * An Ad Run draws its Products from the flagships, so a catalog carrying none
+ * plans nothing. That happens twice: when the extractor shortlists nothing, and
+ * when a person keeps only Products it did not shortlist. Both fall back to the
+ * head of the list, which is the shop's own order.
+ *
+ * A Product with no description can never hold the mark, whichever way it got
+ * there — the Concept it would produce cannot be decoded.
+ */
+export function withFlagships(products: readonly Product[]): Product[] {
+  const marked = products.map((product) =>
+    product.flagship && isAdvertisable(product)
+      ? product
+      : { ...product, flagship: false },
+  );
+  if (marked.some(({ flagship }) => flagship)) return marked;
+
+  let taken = 0;
+  return marked.map((product) => {
+    if (taken >= AD_PRODUCT_CONCEPT_MAX || !isAdvertisable(product)) {
+      return product;
+    }
+    taken += 1;
+    return { ...product, flagship: true };
+  });
+}
+
 function decodeSubject(value: unknown, name = "concept.subject"): ConceptSubject {
   const subject = record(value, name);
   const kind = text(subject.kind, `${name}.kind`, { min: 1, max: 16, trim: true });
@@ -390,7 +442,7 @@ function decodeSubject(value: unknown, name = "concept.subject"): ConceptSubject
   if (kind !== "product") invalid(`${name}.kind is unknown`);
 
   onlyKeys(subject, ["kind", "name", "description", "imageUrl"], name);
-  return { kind, ...decodeAdvertisedProduct(subject, name) };
+  return { kind, ...decodeAdvertisedProduct(subject, name, 1) };
 }
 
 function decodeConcept(value: unknown): PlannedConcept {

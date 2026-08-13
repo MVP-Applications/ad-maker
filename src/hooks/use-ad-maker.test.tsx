@@ -154,14 +154,16 @@ function atPhase<Phase extends AdMakerController["phase"]>(
 }
 
 /**
- * The run now stops at the Brief, so every test that wants ads has to ask for
- * them. Reaching the gallery is two steps, not one.
+ * The run now stops twice before it makes anything — once on the catalogue and
+ * once on the Brief — so every test that wants ads walks through both. The
+ * catalogue arrives fully selected, so keeping it whole is the default path.
  */
 async function startAndGenerate(
   result: { current: AdMakerController },
   domain = "stripe.com",
 ): Promise<void> {
   await act(() => atPhase(result.current, "idle").start(domain));
+  act(() => atPhase(result.current, "catalog").confirmSelection());
   await act(() => atPhase(result.current, "compose").generate());
 }
 
@@ -224,19 +226,153 @@ describe("useAdMaker", () => {
 
     await act(() => atPhase(result.current, "idle").start("stripe.com"));
 
-    const compose = atPhase(result.current, "compose");
-    expect(compose.brief.domain).toBe("stripe.com");
-    expect(compose.products).toEqual(briefFor(plan).products);
-    expect(compose.planning).toBe(false);
-    expect(compose.error).toBeNull();
+    // The catalogue arrives whole and entirely selected.
+    const catalog = atPhase(result.current, "catalog");
+    expect(catalog.brief.domain).toBe("stripe.com");
+    expect(catalog.products).toEqual(briefFor(plan).products);
+    expect(catalog.selectedCount).toBe(catalog.products.length);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "/api/brief?domain=stripe.com&v=5",
     );
 
+    act(() => catalog.confirmSelection());
+
+    const compose = atPhase(result.current, "compose");
+    expect(compose.products).toEqual(briefFor(plan).products);
+    expect(compose.planning).toBe(false);
+    expect(compose.error).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
     await act(() => compose.generate());
 
     expect(result.current.phase).toBe("generating");
+  });
+
+  it("keeps only the Products still selected when the catalogue is confirmed", async () => {
+    const plan = planFor();
+    const pendingAd = deferred<Response>();
+    fetchMock.mockImplementation((input) => {
+      const planning = planningResponse(plan, String(input));
+      return planning ? Promise.resolve(planning) : pendingAd.promise;
+    });
+    const { result } = renderHook(() => useAdMaker());
+
+    await act(() => atPhase(result.current, "idle").start("stripe.com"));
+    act(() => atPhase(result.current, "catalog").deselectAll());
+    expect(atPhase(result.current, "catalog").selectedCount).toBe(0);
+
+    // Names are keyed case-insensitively, as the contract treats them.
+    act(() => atPhase(result.current, "catalog").toggleProduct("BILLING"));
+    expect(atPhase(result.current, "catalog").selectedCount).toBe(1);
+
+    act(() => atPhase(result.current, "catalog").confirmSelection());
+
+    expect(atPhase(result.current, "compose").products.map(({ name }) => name))
+      .toEqual(["Billing"]);
+  });
+
+  it("toggles a Product off and on, and restores the whole catalogue", async () => {
+    const plan = planFor();
+    const pendingAd = deferred<Response>();
+    fetchMock.mockImplementation((input) => {
+      const planning = planningResponse(plan, String(input));
+      return planning ? Promise.resolve(planning) : pendingAd.promise;
+    });
+    const { result } = renderHook(() => useAdMaker());
+
+    await act(() => atPhase(result.current, "idle").start("stripe.com"));
+    const total = atPhase(result.current, "catalog").products.length;
+
+    act(() => atPhase(result.current, "catalog").toggleProduct("Payments"));
+    expect(atPhase(result.current, "catalog").selectedCount).toBe(total - 1);
+
+    act(() => atPhase(result.current, "catalog").toggleProduct("Payments"));
+    expect(atPhase(result.current, "catalog").selectedCount).toBe(total);
+
+    act(() => atPhase(result.current, "catalog").deselectAll());
+    act(() => atPhase(result.current, "catalog").selectAll());
+    expect(atPhase(result.current, "catalog").selectedCount).toBe(total);
+  });
+
+  // An Ad Run advertises flagships, so a selection holding none of them would
+  // plan nothing at all. The kept Products are re-marked instead.
+  it("re-marks the kept Products when the selection holds no flagship", async () => {
+    const plan = planFor();
+    const catalogue = briefFor(plan).products.map((product, index) => ({
+      ...product,
+      flagship: index === 0,
+    }));
+    const pendingAd = deferred<Response>();
+    fetchMock.mockImplementation((input) => {
+      const href = String(input);
+      if (href.startsWith("/api/brief")) {
+        return Promise.resolve(
+          jsonResponse({ brief: plan.brief, products: catalogue }),
+        );
+      }
+      if (href.startsWith("/api/concepts")) return Promise.resolve(jsonResponse(plan));
+      return pendingAd.promise;
+    });
+    const { result } = renderHook(() => useAdMaker());
+
+    await act(() => atPhase(result.current, "idle").start("stripe.com"));
+    act(() => atPhase(result.current, "catalog").deselectAll());
+    // "Connect" was not the flagship; keeping only it would leave none.
+    act(() => atPhase(result.current, "catalog").toggleProduct("Connect"));
+    act(() => atPhase(result.current, "catalog").confirmSelection());
+
+    const kept = atPhase(result.current, "compose").products;
+    expect(kept.map(({ name }) => name)).toEqual(["Connect"]);
+    expect(kept.every(({ flagship }) => flagship)).toBe(true);
+  });
+
+  // Keeping only Products the shop never described leaves nothing to write an
+  // ad about. Refused here, where the choice was made, rather than two screens
+  // later as a planning failure.
+  it("refuses a selection holding no Product it could advertise", async () => {
+    const plan = planFor();
+    const catalogue = briefFor(plan).products.map((product, index) =>
+      index === 0 ? product : { ...product, description: "", flagship: false },
+    );
+    fetchMock.mockImplementation((input) => {
+      const href = String(input);
+      if (href.startsWith("/api/brief")) {
+        return Promise.resolve(
+          jsonResponse({ brief: plan.brief, products: catalogue }),
+        );
+      }
+      return Promise.resolve(
+        planningResponse(plan, href) ?? imageResponse(),
+      );
+    });
+    const { result } = renderHook(() => useAdMaker());
+
+    await act(() => atPhase(result.current, "idle").start("stripe.com"));
+    act(() => atPhase(result.current, "catalog").deselectAll());
+    act(() => atPhase(result.current, "catalog").toggleProduct("Billing"));
+
+    const catalog = atPhase(result.current, "catalog");
+    expect(catalog.selectedCount).toBe(1);
+    expect(catalog.advertisableCount).toBe(0);
+
+    act(() => catalog.confirmSelection());
+
+    expect(result.current.phase).toBe("catalog");
+  });
+
+  it("refuses to leave the catalogue with nothing selected", async () => {
+    const plan = planFor();
+    fetchMock.mockImplementation((input) =>
+      Promise.resolve(planningResponse(plan, String(input)) ?? imageResponse()),
+    );
+    const { result } = renderHook(() => useAdMaker());
+
+    await act(() => atPhase(result.current, "idle").start("stripe.com"));
+    act(() => atPhase(result.current, "catalog").deselectAll());
+    act(() => atPhase(result.current, "catalog").confirmSelection());
+
+    expect(result.current.phase).toBe("catalog");
   });
 
   // A failed plan must not cost the extract that produced the Brief, so the
@@ -262,6 +398,7 @@ describe("useAdMaker", () => {
     const { result } = renderHook(() => useAdMaker());
 
     await act(() => atPhase(result.current, "idle").start("stripe.com"));
+    act(() => atPhase(result.current, "catalog").confirmSelection());
     await act(() => atPhase(result.current, "compose").generate());
 
     const failed = atPhase(result.current, "compose");
@@ -289,6 +426,7 @@ describe("useAdMaker", () => {
     const { result } = renderHook(() => useAdMaker());
 
     await act(() => atPhase(result.current, "idle").start("stripe.com"));
+    act(() => atPhase(result.current, "catalog").confirmSelection());
     const compose = atPhase(result.current, "compose");
     void compose.generate();
     await waitFor(() =>
@@ -336,6 +474,7 @@ describe("useAdMaker", () => {
     const { result } = renderHook(() => useAdMaker());
 
     await act(() => atPhase(result.current, "idle").start("stripe.com"));
+    act(() => atPhase(result.current, "catalog").confirmSelection());
     await act(() => atPhase(result.current, "compose").generate());
 
     expect(fetchMock).toHaveBeenCalledTimes(2);

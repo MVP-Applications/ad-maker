@@ -5,6 +5,7 @@ import ImageMouseTrail from "@/components/ui/mousetrail";
 import { Header, FortuneCookie } from "@/components/site-header";
 import {
   BoltIcon,
+  CheckIcon,
   DownloadIcon,
   GlobeIcon,
   RefreshIcon,
@@ -16,6 +17,7 @@ import {
   AD_RUN_MAX_SIZE,
   AD_RUN_MIN_SIZE,
   type AdBrief,
+  type Product,
 } from "@/lib/ad-run";
 import { directionByKey } from "@/lib/generate/directions";
 import { researchStage } from "@/lib/research-stages";
@@ -24,6 +26,7 @@ import type { AdMakerController, AdSlot } from "@/hooks/use-ad-maker";
 
 type IdleController = Extract<AdMakerController, { phase: "idle" }>;
 type BriefController = Extract<AdMakerController, { phase: "brief" }>;
+type CatalogController = Extract<AdMakerController, { phase: "catalog" }>;
 type ComposeController = Extract<AdMakerController, { phase: "compose" }>;
 /** The gallery and nothing else: every earlier phase now has its own screen. */
 type WorkspaceController = Extract<
@@ -58,6 +61,8 @@ export function AdMaker({ s }: { s: AdMakerController }) {
           <Hero s={s} />
         ) : s.phase === "brief" ? (
           <Researching s={s} />
+        ) : s.phase === "catalog" ? (
+          <Catalog s={s} />
         ) : s.phase === "compose" ? (
           <Compose s={s} />
         ) : (
@@ -196,6 +201,156 @@ function Researching({ s }: { s: BriefController }) {
         </div>
       </div>
     </section>
+  );
+}
+
+/* ────────────────── the catalogue, for keeping or cutting ────────────────── */
+
+const priceLabel = (product: Product): string | null => {
+  if (product.price === null) return null;
+  const amount = product.price.toFixed(2);
+  return product.currency ? `${product.currency} ${amount}` : amount;
+};
+
+function ProductCard({
+  product,
+  checked,
+  onToggle,
+}: {
+  product: Product;
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  const price = priceLabel(product);
+
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      onClick={onToggle}
+      className={`group relative overflow-hidden rounded-2xl border text-left transition ${
+        checked
+          ? "border-primary/70 bg-card ring-2 ring-primary/40"
+          : "border-border bg-card opacity-60 hover:opacity-100"
+      }`}
+    >
+      <div className="relative aspect-square bg-brand-dark">
+        {product.imageUrl ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={product.imageUrl}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            className="size-full object-cover"
+          />
+        ) : (
+          <span className="grid size-full place-items-center text-[11px] text-muted-foreground">
+            no photo
+          </span>
+        )}
+
+        <span
+          aria-hidden
+          className={`absolute right-2.5 top-2.5 grid size-6 place-items-center rounded-full ring-1 transition ${
+            checked
+              ? "bg-primary text-white ring-primary"
+              : "bg-black/50 text-transparent ring-white/40"
+          }`}
+        >
+          <CheckIcon />
+        </span>
+
+        {product.flagship && (
+          <span className="absolute left-2.5 top-2.5 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-brand-washed ring-1 ring-primary/40">
+            Suggested
+          </span>
+        )}
+      </div>
+
+      <div className="p-3">
+        <p className="truncate text-[12px] font-semibold text-foreground">
+          {product.name}
+        </p>
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
+          {price ?? "—"}
+        </p>
+      </div>
+    </button>
+  );
+}
+
+function Catalog({ s }: { s: CatalogController }) {
+  const total = s.products.length;
+  // A shop names far more than it describes, and only a described Product can
+  // become an ad. Keeping the undescribed ones is fine; keeping only them is not.
+  const blocked = s.advertisableCount === 0;
+
+  return (
+    <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 px-5 py-8 pb-28">
+      <BrandBar
+        brief={s.brief}
+        cleanDomain={s.submittedDomain}
+        onReset={s.reset}
+      />
+
+      <div className="animate-fade-up text-center [animation-delay:60ms]">
+        <h1 className="text-gradient text-3xl font-semibold tracking-tight">
+          Your products
+        </h1>
+        <p className="mt-2 text-[14px] text-muted-foreground">
+          We found {total} on {s.submittedDomain}. Keep the ones you want to
+          advertise.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-[13px] font-medium text-foreground">
+          {s.selectedCount} of {total} selected
+        </p>
+        <div className="flex items-center gap-2">
+          <button onClick={s.selectAll} className="btn-secondary text-[12px]">
+            Select all
+          </button>
+          <button onClick={s.deselectAll} className="btn-secondary text-[12px]">
+            Deselect all
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 min-[560px]:grid-cols-3 lg:grid-cols-4">
+        {s.products.map((product) => (
+          <ProductCard
+            key={product.name}
+            product={product}
+            checked={s.selected.has(product.name.trim().toLocaleLowerCase())}
+            onToggle={() => s.toggleProduct(product.name)}
+          />
+        ))}
+      </div>
+
+      {/* Kept in view: the list runs to hundreds, and the way forward should not
+          be somewhere at the bottom of it. */}
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-background/90 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-5 py-3.5">
+          <p className="text-[12px] text-muted-foreground">
+            {s.selectedCount === 0
+              ? "Select at least one product to continue"
+              : blocked
+                ? "None of these say what they are — keep one with a description to advertise"
+                : `${s.selectedCount} kept · ${s.advertisableCount} can be advertised`}
+          </p>
+          <button
+            onClick={s.confirmSelection}
+            disabled={blocked}
+            className="btn-gradient disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Continue with {s.selectedCount} →
+          </button>
+        </div>
+      </div>
+    </main>
   );
 }
 

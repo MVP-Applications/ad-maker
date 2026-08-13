@@ -7,6 +7,7 @@ import {
   decodeAdRunPlan,
   decodeRenderedAdQuery,
   renderedAdHref,
+  withFlagships,
   type AdBrief,
   type ConceptSubject,
   type PlannedConcept,
@@ -91,6 +92,45 @@ const adRunBrief = (productCount = 3) => ({
     url: null,
     flagship: index < 3,
   })),
+});
+
+// An Ad Run draws its Products from the flagships, so a catalog carrying none
+// plans nothing at all.
+test("withFlagships leaves a catalog that already has one alone", () => {
+  const catalog = decodeAdRunBrief(adRunBrief(6)).products;
+
+  expect(withFlagships(catalog)).toEqual(catalog);
+});
+
+test("withFlagships falls back to the head of an unmarked catalog", () => {
+  const catalog = decodeAdRunBrief(adRunBrief(6)).products.map((product) => ({
+    ...product,
+    flagship: false,
+  }));
+
+  const marked = withFlagships(catalog);
+
+  expect(marked.map(({ flagship }) => flagship)).toEqual([
+    true,
+    true,
+    true,
+    false,
+    false,
+    false,
+  ]);
+  // The Products themselves are untouched; only the mark moves.
+  expect(marked.map(({ name }) => name)).toEqual(
+    catalog.map(({ name }) => name),
+  );
+});
+
+test("withFlagships marks a shorter catalog than an Ad Run can hold", () => {
+  const single = decodeAdRunBrief(adRunBrief(1)).products.map((product) => ({
+    ...product,
+    flagship: false,
+  }));
+
+  expect(withFlagships(single).map(({ flagship }) => flagship)).toEqual([true]);
 });
 
 test("decodes a Brief carrying a catalog longer than one Ad Run", () => {

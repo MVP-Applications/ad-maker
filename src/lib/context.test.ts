@@ -111,20 +111,47 @@ describe("researchBrand", () => {
     expect(JSON.stringify(research)).not.toContain("Logitech");
   });
 
-  it("drops a flagship missing either half of its copy", async () => {
+  // A shop names far more than it describes — nuphy.com describes 29 of its 680
+  // — so an undescribed Product is a catalogue entry somebody can still choose,
+  // not a reason to hide it. Only an unnamed one is unusable.
+  it("keeps an undescribed Product but never advertises it", async () => {
     vi.stubGlobal("fetch", respond(extract({
-      flagships: [
-        { name: "Named but undescribed", description: "   " },
+      products: [
+        { name: "Named but undescribed", description: "   ", price: 49 },
         { name: "", description: "Described but unnamed." },
         { name: "NuPhy Gem80", description: "TKL custom mechanical keyboard." },
       ],
+      flagships: [],
     })));
 
     const research = await researchBrand("nuphy.com");
 
-    expect(research.products).toEqual([
-      { name: "NuPhy Gem80", description: "TKL custom mechanical keyboard.", imageUrl: null, price: null, currency: null, url: null, flagship: true },
+    expect(research.products.map(({ name }) => name)).toEqual([
+      "Named but undescribed",
+      "NuPhy Gem80",
     ]);
+    expect(research.products[0]).toMatchObject({
+      description: "",
+      price: 49,
+      flagship: false,
+    });
+    // The fallback skips past the undescribed entry to one that can carry an ad.
+    expect(research.products[1].flagship).toBe(true);
+  });
+
+  it("refuses a catalogue that names Products but describes none of them", async () => {
+    vi.stubGlobal("fetch", respond(extract({
+      products: [
+        { name: "Beat Boy", price: 49 },
+        { name: "Plates for Kick75", price: 29.95 },
+      ],
+      flagships: [],
+    })));
+
+    await expect(researchBrand("nuphy.com")).rejects.toMatchObject({
+      name: "BrandExtractorError",
+      kind: "no-products",
+    });
   });
 
   it("carries the shop's own photo of each flagship", async () => {
@@ -354,6 +381,41 @@ describe("researchBrand", () => {
 
     expect(research.languages).toEqual(["en", "ja", "ko"]);
     expect(research.brand.heroImageUrl).toBe("https://cdn.shopify.com/hero.jpg");
+  });
+
+  // A plain slice would drop the shortlist, which is appended after the
+  // catalogue: a Brief with a thousand Products and nothing to advertise reads
+  // to the person as "we found no products" on the largest shops we handle.
+  it("keeps the shortlist when the catalogue overflows the ceiling", async () => {
+    vi.stubGlobal("fetch", respond(extract({
+      products: Array.from({ length: AD_CATALOG_MAX + 50 }, (_, index) => ({
+        name: `Filler ${index + 1}`,
+        description: `Filler product number ${index + 1}.`,
+      })),
+      flagships: [
+        { name: "NuPhy Gem80", description: "TKL custom mechanical keyboard." },
+      ],
+    })));
+
+    const { products } = await researchBrand("nuphy.com");
+
+    expect(products).toHaveLength(AD_CATALOG_MAX);
+    expect(products.filter(({ flagship }) => flagship).map(({ name }) => name))
+      .toEqual(["NuPhy Gem80"]);
+  });
+
+  it("holds the ceiling even when the shortlist alone would exceed it", async () => {
+    vi.stubGlobal("fetch", respond(extract({
+      products: [],
+      flagships: Array.from({ length: AD_CATALOG_MAX + 4 }, (_, index) => ({
+        name: `Flagship ${index + 1}`,
+        description: `Shortlisted product number ${index + 1}.`,
+      })),
+    })));
+
+    const { products } = await researchBrand("nuphy.com");
+
+    expect(products).toHaveLength(AD_CATALOG_MAX);
   });
 
   it("reports a site it could not read separately from a service that is down", async () => {

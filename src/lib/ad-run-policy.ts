@@ -13,9 +13,11 @@ export const AD_PRIMARY_MODEL_COUNT = 3 as const;
  * pick automatically.
  *
  * Sized against real shops rather than a round number: allbirds.com publishes
- * 291 products and the extractor returns every one of them.
+ * 291 products and nuphy.com 680, and the extractor returns every one of them.
+ * All 680 weigh 208 KB in a Brief, so the ceiling is about the size of the page
+ * rather than the size of the payload.
  */
-export const AD_CATALOG_MAX = 300 as const;
+export const AD_CATALOG_MAX = 1000 as const;
 
 export const AD_RUN_LIMITS = {
   domain: 253,

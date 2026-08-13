@@ -5,7 +5,10 @@ import {
   briefHref,
   decodeAdRunBrief,
   decodeAdRunPlan,
+  isAdvertisable,
+  productKey,
   renderedAdHref,
+  withFlagships,
   type AdBrief,
   type AdRunBrief,
   type PlannedConcept,
@@ -55,6 +58,31 @@ type BriefController = {
 };
 
 /**
+ * The catalogue, for keeping or discarding. Everything the shop sells arrives
+ * selected: the extract found it, and saying which of it is yours is quicker
+ * from a full list than from an empty one.
+ */
+type CatalogController = {
+  phase: "catalog";
+  submittedDomain: string;
+  brief: AdBrief;
+  products: readonly Product[];
+  /** Product keys, so a name's casing cannot make one Product into two. */
+  selected: ReadonlySet<string>;
+  selectedCount: number;
+  /**
+   * How many of the selected Products an ad could be written about. A shop
+   * describes only part of its range, and a run needs at least one of those.
+   */
+  advertisableCount: number;
+  toggleProduct(name: string): void;
+  selectAll(): void;
+  deselectAll(): void;
+  confirmSelection(): void;
+  reset(): void;
+};
+
+/**
  * The Brief is read and nothing has been decided yet. The run waits here for
  * the choices that shape it; today the only one is whether to make it at all.
  */
@@ -95,6 +123,7 @@ type DoneController = ActiveController & {
 export type AdMakerController =
   | IdleController
   | BriefController
+  | CatalogController
   | ComposeController
   | GeneratingController
   | DoneController;
@@ -102,6 +131,13 @@ export type AdMakerController =
 type InternalState =
   | { stage: "idle"; error: string | null }
   | { stage: "brief"; epoch: number; submittedDomain: string }
+  | {
+      stage: "catalog";
+      epoch: number;
+      submittedDomain: string;
+      adRunBrief: AdRunBrief;
+      selected: ReadonlySet<string>;
+    }
   | {
       stage: "compose";
       epoch: number;
@@ -344,12 +380,11 @@ export function useAdMaker(): AdMakerController {
         // The run stops here. Planning is a separate call precisely so that the
         // choices made against this Brief can come between the two.
         commit({
-          stage: "compose",
+          stage: "catalog",
           epoch,
           submittedDomain,
           adRunBrief,
-          planning: false,
-          error: null,
+          selected: new Set(adRunBrief.products.map(({ name }) => productKey(name))),
         });
       } catch (error) {
         if (isStale(epoch, rootController)) return;
@@ -362,6 +397,73 @@ export function useAdMaker(): AdMakerController {
     },
     [commit, invalidateCurrentRun, isStale],
   );
+
+  const withCatalog = useCallback(
+    (change: (selected: ReadonlySet<string>) => ReadonlySet<string>) => {
+      const current = stateRef.current;
+      if (current.stage !== "catalog") return;
+      commit({ ...current, selected: change(current.selected) });
+    },
+    [commit],
+  );
+
+  const toggleProduct = useCallback(
+    (name: string) =>
+      withCatalog((selected) => {
+        const next = new Set(selected);
+        const key = productKey(name);
+        if (!next.delete(key)) next.add(key);
+        return next;
+      }),
+    [withCatalog],
+  );
+
+  const selectAll = useCallback(() => {
+    const current = stateRef.current;
+    if (current.stage !== "catalog") return;
+    withCatalog(
+      () =>
+        new Set(
+          current.adRunBrief.products.map(({ name }) => productKey(name)),
+        ),
+    );
+  }, [withCatalog]);
+
+  const deselectAll = useCallback(
+    () => withCatalog(() => new Set<string>()),
+    [withCatalog],
+  );
+
+  /**
+   * Keep what was selected and carry it forward as the catalogue.
+   *
+   * An Ad Run advertises flagships, and a selection can easily contain none of
+   * them — so the kept Products are re-marked, falling back to the head of the
+   * list exactly as an unshortlisted extract does.
+   */
+  const confirmSelection = useCallback(() => {
+    const current = stateRef.current;
+    if (current.stage !== "catalog") return;
+    const kept = current.adRunBrief.products.filter(({ name }) =>
+      current.selected.has(productKey(name)),
+    );
+    // Nothing describable means nothing to advertise, and the run would fail
+    // several screens later with a message about planning rather than about
+    // this choice. Refuse here, where the choice was made.
+    if (!kept.some(isAdvertisable)) return;
+
+    commit({
+      stage: "compose",
+      epoch: current.epoch,
+      submittedDomain: current.submittedDomain,
+      adRunBrief: {
+        brief: current.adRunBrief.brief,
+        products: withFlagships(kept),
+      },
+      planning: false,
+      error: null,
+    });
+  }, [commit]);
 
   const generate = useCallback(async () => {
     const current = stateRef.current;
@@ -609,6 +711,25 @@ export function useAdMaker(): AdMakerController {
       phase: "brief",
       submittedDomain: state.submittedDomain,
       elapsed,
+      reset,
+    };
+  }
+  if (state.stage === "catalog") {
+    const selectedProducts = state.adRunBrief.products.filter(({ name }) =>
+      state.selected.has(productKey(name)),
+    );
+    return {
+      phase: "catalog",
+      submittedDomain: state.submittedDomain,
+      brief: state.adRunBrief.brief,
+      products: state.adRunBrief.products,
+      selected: state.selected,
+      selectedCount: selectedProducts.length,
+      advertisableCount: selectedProducts.filter(isAdvertisable).length,
+      toggleProduct,
+      selectAll,
+      deselectAll,
+      confirmSelection,
       reset,
     };
   }

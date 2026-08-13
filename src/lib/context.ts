@@ -4,10 +4,9 @@ import {
   type BrandColor,
 } from "@/lib/brand-color";
 import { normalizeFontFamily } from "@/lib/font-family";
-import type { Product } from "@/lib/ad-run";
+import { productKey, withFlagships, type Product } from "@/lib/ad-run";
 import {
   AD_CATALOG_MAX,
-  AD_PRODUCT_CONCEPT_MAX,
   AD_PRODUCT_CONCEPT_MIN,
   AD_RUN_LIMITS,
 } from "@/lib/ad-run-policy";
@@ -173,17 +172,19 @@ function logoFrom(value: string | null): string | null {
 }
 
 /**
- * The extractor's `profile` is model-inferred rather than scraped, so only the
- * fields that shape a look are read from it. `competitors` names real third
- * parties on a guess and must never reach an ad.
+ * One catalogue entry, or nothing when the shop does not even name it.
+ *
+ * A missing description is not a reason to drop one. Shops describe a small
+ * fraction of what they list — nuphy.com describes 29 of its 680 products —
+ * and a name, a photograph and a price are everything the person choosing one
+ * needs. Only the ad-writing step needs more, and it asks separately.
  */
-/** One catalogue entry, or nothing when the shop states too little to use it. */
 function productFrom(
   product: z.infer<typeof productSchema>,
 ): Omit<Product, "flagship"> | null {
   const name = (product.name ?? "").trim();
   const description = (product.description ?? "").trim();
-  if (!name || !description) return null;
+  if (!name) return null;
 
   const price = product.price;
   return {
@@ -205,8 +206,39 @@ function productFrom(
   };
 }
 
-const productKey = (name: string) => name.trim().toLocaleLowerCase();
+/**
+ * Bound the catalogue without cutting away the Products worth advertising.
+ *
+ * A plain slice would: the shortlist is appended after the catalogue, and on a
+ * shop longer than the ceiling those entries fall off the end — leaving a Brief
+ * with hundreds of Products and nothing to advertise, which reads to the person
+ * as "we found no products" on the largest catalogues we handle.
+ */
+function boundCatalogue(entries: Product[]): Product[] {
+  if (entries.length <= AD_CATALOG_MAX) return entries;
 
+  // The shortlist goes first and the rest fill what is left, so the ceiling
+  // still holds when the shortlist alone would exceed it.
+  let shortlist = Math.min(
+    entries.filter(({ flagship }) => flagship).length,
+    AD_CATALOG_MAX,
+  );
+  let rest = AD_CATALOG_MAX - shortlist;
+
+  return entries.filter((entry) => {
+    const room = entry.flagship ? shortlist : rest;
+    if (room <= 0) return false;
+    if (entry.flagship) shortlist -= 1;
+    else rest -= 1;
+    return true;
+  });
+}
+
+/**
+ * The extractor's `profile` is model-inferred rather than scraped, so only the
+ * fields that shape a look are read from it. `competitors` names real third
+ * parties on a guess and must never reach an ad.
+ */
 function researchFrom(domain: string, body: ExtractResponse): BrandResearch {
   const brand = body.brand ?? {};
 
@@ -221,30 +253,26 @@ function researchFrom(domain: string, body: ExtractResponse): BrandResearch {
   );
 
   const seen = new Set<string>();
-  const catalogue = [...(body.products ?? []), ...(body.flagships ?? [])]
-    .flatMap((raw) => {
+  const entries = [...(body.products ?? []), ...(body.flagships ?? [])].flatMap(
+    (raw) => {
       const product = productFrom(raw);
       if (!product) return [];
       const key = productKey(product.name);
       if (seen.has(key)) return [];
       seen.add(key);
       return [{ ...product, flagship: flagshipKeys.has(key) }];
-    })
-    .slice(0, AD_CATALOG_MAX);
+    },
+  );
 
   // Nothing was shortlisted, so the run falls back to the head of the
   // catalogue — the shop's own order, which is how it ranks itself.
-  const products = catalogue.some(({ flagship }) => flagship)
-    ? catalogue
-    : catalogue.map((product, index) => ({
-        ...product,
-        flagship: index < AD_PRODUCT_CONCEPT_MAX,
-      }));
+  const products = withFlagships(boundCatalogue(entries));
 
-  if (products.filter(({ flagship }) => flagship).length < AD_PRODUCT_CONCEPT_MIN) {
+  if (!products.some(({ flagship }) => flagship)) {
+    const described = entries.filter(({ description }) => description).length;
     throw new BrandExtractorError(
       "no-products",
-      `extractor returned ${products.length} advertisable products`,
+      `extractor returned ${entries.length} products, ${described} of them described`,
     );
   }
 
