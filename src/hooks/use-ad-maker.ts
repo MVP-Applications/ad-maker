@@ -84,8 +84,8 @@ type CatalogController = {
 
 /**
  * Everything the extract found about the brand itself, laid out to be checked
- * before it reaches an advertisement. Read-only: the fields are shown so a
- * wrong one is caught here rather than recognised in a finished ad.
+ * before it reaches an advertisement. Editable: a field the extract read wrong
+ * is corrected here rather than recognised later in a finished ad.
  */
 type DnaController = {
   phase: "dna";
@@ -94,6 +94,12 @@ type DnaController = {
   products: readonly Product[];
   /** Every photograph the extract carries: the hero shot, then the catalogue. */
   images: readonly string[];
+  /** Everything the shop sells, so a Product dropped here can be added back. */
+  catalogue: readonly Product[];
+  /** Correct one or more Brief fields; the run carries the corrected copy. */
+  editBrief(patch: Partial<AdBrief>): void;
+  /** Keep or drop one Product without leaving the Brief. */
+  toggleProduct(name: string): void;
   confirmBrand(): void;
   back(): void;
   reset(): void;
@@ -500,8 +506,77 @@ export function useAdMaker(): AdMakerController {
       stage: "catalog",
       epoch: current.epoch,
       submittedDomain: current.submittedDomain,
-      adRunBrief: current.catalogue,
+      // The catalogue's products, but the Brief as it now stands. Restoring
+      // the catalogue wholesale would restore the Brief the extract produced
+      // and silently undo every correction made against it, which is a long
+      // way to lose work: the person went back to change the products.
+      adRunBrief: {
+        ...current.catalogue,
+        brief: current.adRunBrief.brief,
+      },
       selected: current.selected,
+    });
+  }, [commit]);
+
+  /**
+   * Correct one field of the Brief the extract produced.
+   *
+   * The extract reads a site rather than being told about it, so it is wrong
+   * often enough that a person has to be able to say so — and this screen is
+   * the last place before the Brief reaches a model. The patch is merged into
+   * the Brief the run carries, so what is generated is what is on screen.
+   */
+  const editBrief = useCallback((patch: Partial<AdBrief>) => {
+    const current = stateRef.current;
+    if (current.stage !== "dna") return;
+    commit({
+      ...current,
+      adRunBrief: {
+        ...current.adRunBrief,
+        brief: { ...current.adRunBrief.brief, ...patch },
+      },
+    });
+  }, [commit]);
+
+  /**
+   * Keep or drop one Product without leaving the Brief.
+   *
+   * The catalogue is the source of what may be added back, so a Product
+   * dropped here is not gone — it returns to the same place in the shop's own
+   * order it came from. The selection is kept in step so a later trip back to
+   * the catalogue shows what this screen decided.
+   */
+  const toggleDnaProduct = useCallback((name: string) => {
+    const current = stateRef.current;
+    if (current.stage !== "dna") return;
+
+    const key = productKey(name);
+    const kept = current.adRunBrief.products;
+    const isKept = kept.some((product) => productKey(product.name) === key);
+
+    const keptKeys = new Set(kept.map((product) => productKey(product.name)));
+    if (isKept) keptKeys.delete(key);
+    else keptKeys.add(key);
+
+    const next = current.catalogue.products.filter((product) =>
+      keptKeys.has(productKey(product.name)),
+    );
+
+    // The same rule the catalogue enforces: a run needs something it can
+    // actually write an ad about, and refusing here says so where it is read.
+    if (!next.some(isAdvertisable)) return;
+
+    const selected = new Set(current.selected);
+    if (isKept) selected.delete(key);
+    else selected.add(key);
+
+    commit({
+      ...current,
+      adRunBrief: {
+        ...current.adRunBrief,
+        products: withFlagships(next),
+      },
+      selected,
     });
   }, [commit]);
 
@@ -800,6 +875,9 @@ export function useAdMaker(): AdMakerController {
       brief,
       products,
       images,
+      catalogue: state.catalogue.products,
+      editBrief,
+      toggleProduct: toggleDnaProduct,
       confirmBrand,
       back: backToCatalog,
       reset,

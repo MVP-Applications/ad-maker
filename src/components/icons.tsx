@@ -1,3 +1,9 @@
+/** A dismissal cross. Not [XIcon] — that one is the X.com wordmark, and a
+ *  Cancel button wearing a social network's logo reads as "post this". */
+export function CloseIcon({ className }: { className?: string }) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className={className ?? "size-4"}><path d="M18 6 6 18M6 6l12 12" /></svg>;
+}
+
 export function XIcon() {
   return <svg viewBox="0 0 24 24" fill="currentColor" className="w-4"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" /></svg>;
 }
@@ -12,6 +18,18 @@ export function ImageIcon() {
 
 export function GlobeIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="size-4"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></svg>;
+}
+
+export function UploadIcon({ className }: { className?: string }) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className ?? "size-4"}><path d="M12 16V4m0 0L8 8m4-4 4 4M5 20h14" /></svg>;
+}
+
+export function PencilIcon({ className }: { className?: string }) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className ?? "size-4"}><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>;
+}
+
+export function ArrowRightIcon({ className }: { className?: string }) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className ?? "size-5"}><path d="M5 12h14m0 0-6-6m6 6-6 6" /></svg>;
 }
 
 export function ChevronDown({ className }: { className?: string }) {

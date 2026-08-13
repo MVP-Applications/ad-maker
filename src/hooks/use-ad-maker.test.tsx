@@ -300,6 +300,66 @@ describe("useAdMaker", () => {
     expect(catalog.selectedCount).toBe(total - 1);
   });
 
+  /**
+   * The Brief is corrected on the same screen that leads back to the
+   * catalogue, so the trip back must carry the corrections. Restoring the
+   * catalogue wholesale restores the Brief the extract produced with it, and
+   * every correction is lost without anything on screen saying so.
+   */
+  it("keeps Brief corrections across a trip back to the catalogue", async () => {
+    const plan = planFor();
+    const pendingAd = deferred<Response>();
+    fetchMock.mockImplementation((input) => {
+      const planning = planningResponse(plan, String(input));
+      return planning ? Promise.resolve(planning) : pendingAd.promise;
+    });
+    const { result } = renderHook(() => useAdMaker());
+
+    await act(() => atPhase(result.current, "idle").start("stripe.com"));
+    act(() => atPhase(result.current, "catalog").confirmSelection());
+
+    act(() =>
+      atPhase(result.current, "dna").editBrief({
+        brandName: "Corrected Name",
+        fontFamily: "Georgia",
+      }),
+    );
+    expect(atPhase(result.current, "dna").brief.brandName).toBe("Corrected Name");
+
+    act(() => atPhase(result.current, "dna").back());
+    act(() => atPhase(result.current, "catalog").confirmSelection());
+
+    const dna = atPhase(result.current, "dna");
+    expect(dna.brief.brandName).toBe("Corrected Name");
+    expect(dna.brief.fontFamily).toBe("Georgia");
+  });
+
+  it("keeps or adds one Product without leaving the Brief", async () => {
+    const plan = planFor();
+    const pendingAd = deferred<Response>();
+    fetchMock.mockImplementation((input) => {
+      const planning = planningResponse(plan, String(input));
+      return planning ? Promise.resolve(planning) : pendingAd.promise;
+    });
+    const { result } = renderHook(() => useAdMaker());
+
+    await act(() => atPhase(result.current, "idle").start("stripe.com"));
+    act(() => atPhase(result.current, "catalog").confirmSelection());
+
+    const before = atPhase(result.current, "dna");
+    const total = before.catalogue.length;
+    const dropped = before.products[0].name;
+    expect(before.products).toHaveLength(total);
+
+    act(() => atPhase(result.current, "dna").toggleProduct(dropped));
+    expect(atPhase(result.current, "dna").products).toHaveLength(total - 1);
+
+    // Dropped, not gone: the catalogue still offers it back.
+    expect(atPhase(result.current, "dna").catalogue).toHaveLength(total);
+    act(() => atPhase(result.current, "dna").toggleProduct(dropped));
+    expect(atPhase(result.current, "dna").products).toHaveLength(total);
+  });
+
   it("gathers the hero shot and the catalogue's photographs for review", async () => {
     const plan = planFor();
     const catalogue = briefFor(plan).products.map((product, index) => ({

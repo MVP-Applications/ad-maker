@@ -61,9 +61,19 @@ export default {
         shimmer: {
           "100%": { transform: "translateX(100%)" },
         },
+        fadeIn: {
+          "0%": { opacity: "0" },
+          "100%": { opacity: "1" },
+        },
+        sheetIn: {
+          "0%": { opacity: "0", transform: "translateY(8px) scale(0.97)" },
+          "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
+        },
       },
       animation: {
         "fade-up": "fadeUp 0.6s cubic-bezier(0.21,1.02,0.73,1) both",
+        "fade-in": "fadeIn 0.18s ease-out both",
+        "sheet-in": "sheetIn 0.22s cubic-bezier(0.34,1.56,0.64,1) both",
         float: "float 6s ease-in-out infinite",
         blob: "blob 16s ease-in-out infinite",
         shimmer: "shimmer 2.2s ease-in-out infinite",
