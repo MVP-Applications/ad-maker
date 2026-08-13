@@ -24,6 +24,10 @@ export function UploadIcon({ className }: { className?: string }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className ?? "size-4"}><path d="M12 16V4m0 0L8 8m4-4 4 4M5 20h14" /></svg>;
 }
 
+export function PanelIcon({ className }: { className?: string }) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" className={className ?? "size-3.5"}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></svg>;
+}
+
 export function PencilIcon({ className }: { className?: string }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className ?? "size-4"}><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>;
 }

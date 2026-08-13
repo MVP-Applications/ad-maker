@@ -117,6 +117,8 @@ type ComposeController = {
   /** True from the moment Concepts are asked for until they arrive or fail. */
   planning: boolean;
   error: string | null;
+  /** Correct one or more Brief fields; the run carries the corrected copy. */
+  editBrief(patch: Partial<AdBrief>): void;
   generate(): Promise<void>;
   reset(): void;
 };
@@ -126,6 +128,8 @@ type ActiveController = {
   brief: AdBrief;
   elapsed: number;
   doneCount: number;
+  /** Correct one or more Brief fields; the run carries the corrected copy. */
+  editBrief(patch: Partial<AdBrief>): void;
   retrySlot(index: number): void;
   reset(): void;
   downloadAd(index: number): void;
@@ -528,7 +532,9 @@ export function useAdMaker(): AdMakerController {
    */
   const editBrief = useCallback((patch: Partial<AdBrief>) => {
     const current = stateRef.current;
-    if (current.stage !== "dna") return;
+    // Correctable wherever the Brief is on screen — it is reviewed on one
+    // screen and used on the next, and a wrong field is as wrong on both.
+    if (current.stage !== "dna" && current.stage !== "compose") return;
     commit({
       ...current,
       adRunBrief: {
@@ -891,6 +897,7 @@ export function useAdMaker(): AdMakerController {
       products: state.adRunBrief.products,
       planning: state.planning,
       error: state.error,
+      editBrief,
       generate,
       reset,
     };
@@ -903,6 +910,7 @@ export function useAdMaker(): AdMakerController {
     slots: state.slots,
     elapsed,
     doneCount,
+    editBrief,
     retrySlot,
     reset,
     downloadAd,

@@ -8,6 +8,8 @@ import {
   CloseIcon,
   DownloadIcon,
   GlobeIcon,
+  ImageIcon,
+  PanelIcon,
   PencilIcon,
   UploadIcon,
   RefreshIcon,
@@ -40,26 +42,41 @@ import {
 } from "@/lib/fonts";
 import { languageName, OFFERED_LANGUAGES } from "@/lib/languages";
 import { researchStage } from "@/lib/research-stages";
-import { imageModelById, takesProductPhoto } from "@/lib/generate/models";
+import {
+  IMAGE_MODELS,
+  imageModelById,
+  takesProductPhoto,
+  type ImageModelId,
+} from "@/lib/generate/models";
 import type { AdMakerController, AdSlot } from "@/hooks/use-ad-maker";
 
 type IdleController = Extract<AdMakerController, { phase: "idle" }>;
 type BriefController = Extract<AdMakerController, { phase: "brief" }>;
 type CatalogController = Extract<AdMakerController, { phase: "catalog" }>;
 type DnaController = Extract<AdMakerController, { phase: "dna" }>;
-type ComposeController = Extract<AdMakerController, { phase: "compose" }>;
-/** The gallery and nothing else: every earlier phase now has its own screen. */
-type WorkspaceController = Extract<
+/**
+ * The studio is the only screen after the brand is confirmed. Generating an
+ * image adds it to the sheet in place, so there is nowhere else to go and
+ * nothing here needs to know which of the run's phases it is standing in.
+ */
+type StudioController = Extract<
   AdMakerController,
-  { phase: "generating" } | { phase: "done" }
+  { phase: "compose" } | { phase: "generating" } | { phase: "done" }
 >;
 
 const EXAMPLE_DOMAINS = ["stripe.com", "linear.app", "notion.so", "vercel.com"];
 
 export function AdMaker({ s }: { s: AdMakerController }) {
+  // The studio owns its whole viewport, so the shell's breathing room above
+  // every other screen would show as a band of page above it and push it down.
+  const studio =
+    s.phase === "compose" || s.phase === "generating" || s.phase === "done";
+
   return (
     <div className="relative flex min-h-dvh flex-col overflow-x-hidden bg-background font-sans antialiased">
-      <div className="relative z-10 flex flex-1 flex-col pt-6">
+      <div
+        className={`relative z-10 flex flex-1 flex-col ${studio ? "" : "pt-6"}`}
+      >
         {s.phase === "idle" ? (
           <Hero s={s} />
         ) : s.phase === "brief" ? (
@@ -68,10 +85,8 @@ export function AdMaker({ s }: { s: AdMakerController }) {
           <Catalog s={s} />
         ) : s.phase === "dna" ? (
           <BrandDna s={s} />
-        ) : s.phase === "compose" ? (
-          <Compose s={s} />
         ) : (
-          <Workspace s={s} />
+          <Studio s={s} />
         )}
       </div>
     </div>
@@ -1595,88 +1610,242 @@ function BrandDna({ s }: { s: DnaController }) {
  * make the run at all — so this screen states what the Ad Run would be rather
  * than asking anything. The selectors replace that statement.
  */
-function Compose({ s }: { s: ComposeController }) {
-  const advertised = s.products.slice(0, AD_PRODUCT_CONCEPT_MAX);
-  const total = AD_COMPANY_CONCEPT_COUNT + advertised.length;
+/** One image a person asked for by name, and how it is getting on. */
+type Composition = {
+  id: number;
+  prompt: string;
+  status: "loading" | "done" | "error";
+  url?: string;
+  message?: string;
+};
+
+function Studio({ s }: { s: StudioController }) {
+  const [prompt, setPrompt] = useState("");
+  const [model, setModel] = useState<ImageModelId>(IMAGE_MODELS[0].id);
+  const [aspectRatio, setAspectRatio] = useState("1:1");
+  const [made, setMade] = useState<readonly Composition[]>([]);
+  const [railOpen, setRailOpen] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const edgeReached = useLeftEdgeReach(!railOpen);
+  const busy = made.some((c) => c.status === "loading");
+
+  // Object URLs are owned here, so they are released when the screen goes.
+  useEffect(
+    () => () => {
+      made.forEach((c) => c.url && URL.revokeObjectURL(c.url));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const compose = async () => {
+    const asked = prompt.trim();
+    if (!asked) return;
+    const id = Date.now();
+    setMade((was) => [{ id, prompt: asked, status: "loading" }, ...was]);
+    setPrompt("");
+
+    try {
+      const response = await fetch("/api/compose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: asked,
+          model,
+          aspectRatio,
+          brandName: s.brief.brandName,
+          colorA: s.brief.colorA,
+          colorB: s.brief.colorB,
+          fontFamily: s.brief.fontFamily,
+        }),
+      });
+
+      if (!response.ok) {
+        const { error } = (await response
+          .json()
+          .catch(() => ({ error: "That image failed to render." }))) as {
+          error?: string;
+        };
+        setMade((was) =>
+          was.map((c) =>
+            c.id === id
+              ? { ...c, status: "error", message: error ?? "Failed." }
+              : c,
+          ),
+        );
+        return;
+      }
+
+      const url = URL.createObjectURL(await response.blob());
+      setMade((was) =>
+        was.map((c) => (c.id === id ? { ...c, status: "done", url } : c)),
+      );
+    } catch {
+      setMade((was) =>
+        was.map((c) =>
+          c.id === id
+            ? { ...c, status: "error", message: "Couldn't reach the server." }
+            : c,
+        ),
+      );
+    }
+  };
 
   return (
-    <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 px-5 py-8">
-      <BrandBar
-        brief={s.brief}
-        cleanDomain={s.submittedDomain}
-        onReset={s.reset}
-      />
-
-      <section className="animate-fade-up rounded-2xl border border-border bg-card p-5 [animation-delay:80ms]">
-        <h2 className="text-[15px] font-semibold text-foreground">
-          Ready to generate {total} ads
-        </h2>
-        <p className="mt-1 text-[13px] text-muted-foreground">
-          {AD_COMPANY_CONCEPT_COUNT} for {s.brief.brandName} itself, plus one for
-          each product below.
-        </p>
-
-        <ul className="mt-4 grid grid-cols-1 gap-3 min-[480px]:grid-cols-2 lg:grid-cols-3">
-          {advertised.map((product) => (
-            <li
-              key={product.name}
-              className="flex items-center gap-3 rounded-xl border border-border bg-background p-3"
+    <div className="studio-bg flex min-h-[100dvh] w-full flex-col lg:h-[100dvh] lg:flex-row lg:overflow-hidden">
+      {railOpen && (
+        <BrandRail
+          brief={s.brief}
+          submittedDomain={s.submittedDomain}
+          onClose={() => setRailOpen(false)}
+          footer={
+            <button
+              onClick={() => setEditing(true)}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-white/[0.07] px-3 py-2 text-[12.5px] text-[#f4f2ef] transition hover:bg-white/[0.12]"
             >
-              <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg bg-brand-dark ring-1 ring-border">
-                {product.imageUrl ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img
-                    src={product.imageUrl}
-                    alt=""
-                    className="size-full object-cover"
-                  />
-                ) : (
-                  <span className="text-[10px] text-muted-foreground">no photo</span>
-                )}
-              </div>
-              <div className="min-w-0">
-                <p className="truncate text-[13px] font-semibold text-foreground">
-                  {product.name}
-                </p>
-                <p className="truncate text-[11px] text-muted-foreground">
-                  {product.description}
-                </p>
-              </div>
-            </li>
-          ))}
-        </ul>
+              <PencilIcon className="size-3.5" /> Edit brand
+            </button>
+          }
+        />
+      )}
 
-        {s.products.length > advertised.length && (
-          <p className="mt-3 text-[11px] text-muted-foreground">
-            {s.products.length - advertised.length} more product
-            {s.products.length - advertised.length === 1 ? "" : "s"} found on
-            this site — choosing between them comes next.
-          </p>
+      <main className="relative flex min-w-0 flex-1 flex-col lg:h-full lg:overflow-hidden">
+        {/* No bar above the sheet — the work starts at the top of the window.
+            The one control that has to survive hiding the panel waits at the
+            edge the panel came from, and only while it is being reached for. */}
+        {!railOpen && (
+          <button
+            onClick={() => setRailOpen(true)}
+            aria-label="Show the brand panel"
+            title="Show the brand panel"
+            className={`studio-panel fixed left-3 top-4 z-30 grid size-9 place-items-center rounded-lg border border-white/[0.14] text-[#8b8b93] transition-all duration-300 hover:text-[#f4f2ef] focus-visible:opacity-100 ${
+              edgeReached
+                ? "translate-x-0 opacity-100"
+                : "pointer-events-none -translate-x-3 opacity-0"
+            }`}
+          >
+            <PanelIcon className="size-4" />
+          </button>
         )}
 
-        <div className="mt-5 flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => void s.generate()}
-            disabled={s.planning}
-            className="btn-gradient disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {s.planning ? (
-              <>
-                <span className="size-4 animate-spin rounded-full border-2 border-white/50 border-t-transparent" />
-                Planning…
-              </>
-            ) : (
-              <>✨ Generate {total} Ads</>
-            )}
-          </button>
-          <button onClick={s.reset} className="btn-secondary text-[13px]">
-            <RefreshIcon /> Try another brand
-          </button>
+        <div className="min-h-0 flex-1 overflow-y-auto pb-40">
+          {made.length === 0 ? (
+            <div className="flex h-full min-h-[50vh] flex-col items-center justify-center gap-2 px-6 text-center">
+              <p className="text-[14px] text-[#c9c7c2]">
+                Nothing made yet for {s.brief.brandName}
+              </p>
+              <p className="max-w-sm text-[12px] leading-relaxed text-[#6f6f78]">
+                Type what you want below. The brand&apos;s name, colours and
+                typeface are sent with every prompt, so you only describe the
+                picture.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-px bg-white/[0.14] sm:grid-cols-2 xl:grid-cols-3">
+              {made.map((c, position) => (
+                <CompositionTile
+                  key={c.id}
+                  composition={c}
+                  newest={position === 0 && c.status === "done"}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
-        {s.error && <p className="mt-3 text-xs text-red-500">{s.error}</p>}
-      </section>
-    </main>
+        <Composer
+          onGenerate={() => void compose()}
+          busy={busy}
+          busyLabel="Generating…"
+          action="Generate"
+          note="Enter to generate · the brand's name, colours and typeface go with every prompt"
+          prompt={prompt}
+          setPrompt={setPrompt}
+          model={model}
+          setModel={setModel}
+          aspectRatio={aspectRatio}
+          setAspectRatio={setAspectRatio}
+        />
+      </main>
+
+      {editing && (
+        <BrandSheet
+          brief={s.brief}
+          onCommit={s.editBrief}
+          onClose={() => setEditing(false)}
+          onReset={s.reset}
+        />
+      )}
+    </div>
+  );
+}
+
+/** One frame on the sheet, for an image asked for by name. */
+function CompositionTile({
+  composition: c,
+  newest,
+}: {
+  composition: Composition;
+  newest: boolean;
+}) {
+  const [loaded, setLoaded] = useState(false);
+
+  return (
+    <div className="group studio-bg relative aspect-square overflow-hidden">
+      {c.status === "done" && c.url ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={c.url}
+            alt={c.prompt}
+            onLoad={() => setLoaded(true)}
+            className={`size-full object-cover transition-all duration-700 ${
+              loaded ? "scale-100 opacity-100 blur-0" : "scale-[1.02] opacity-0 blur-md"
+            }`}
+          />
+          {newest && (
+            <>
+              <span className="pointer-events-none absolute inset-0 ring-1 ring-inset ring-white/25" />
+              <span className="absolute left-2.5 top-2.5 rounded-[4px] bg-black/55 px-1.5 py-0.5 text-[9.5px] font-medium uppercase tracking-[0.1em] text-white/90 backdrop-blur-sm">
+                New
+              </span>
+            </>
+          )}
+          <div className="pointer-events-none absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/75 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+            <div className="p-2.5">
+              <p className="line-clamp-2 text-[11px] leading-snug text-white/85">
+                {c.prompt}
+              </p>
+              <div className="pointer-events-auto mt-2">
+                <a
+                  href={c.url}
+                  download={`${c.id}.png`}
+                  title="Download"
+                  aria-label="Download"
+                  className="grid size-7 place-items-center rounded-md bg-white/[0.12] text-white/80 backdrop-blur-sm transition hover:bg-white/25 hover:text-white"
+                >
+                  <DownloadIcon />
+                </a>
+              </div>
+            </div>
+          </div>
+        </>
+      ) : c.status === "error" ? (
+        <div className="flex size-full flex-col items-center justify-center gap-2 p-6 text-center">
+          <p className="text-[12.5px] text-[#c9c7c2]">Didn&apos;t render</p>
+          <p className="max-w-[220px] text-[11px] leading-relaxed text-[#6f6f78]">
+            {c.message}
+          </p>
+        </div>
+      ) : (
+        <div className="flex size-full flex-col items-center justify-center gap-2.5 p-6 text-center">
+          <Shimmer />
+          <p className="line-clamp-3 text-[11px] leading-snug text-[#6f6f78]">
+            {c.prompt}
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1696,86 +1865,280 @@ function Shimmer() {
   );
 }
 
-function Workspace({ s }: { s: WorkspaceController }) {
-  const cleanDomain = s.submittedDomain;
-  const generating = s.phase === "generating";
-  const total = s.slots.length;
+/**
+ * True while the pointer is near the left edge of the window.
+ *
+ * With the panel hidden there is nothing on screen to aim at, and a button
+ * parked permanently over the sheet is the clutter hiding the panel was meant
+ * to escape. Reaching for the edge is the gesture that asks for it back, so
+ * the edge is what listens.
+ */
+function useLeftEdgeReach(active: boolean, within = 72): boolean {
+  const [near, setNear] = useState(false);
 
+  useEffect(() => {
+    if (!active) {
+      setNear(false);
+      return;
+    }
+    const onMove = (event: PointerEvent) => setNear(event.clientX <= within);
+    window.addEventListener("pointermove", onMove);
+    return () => window.removeEventListener("pointermove", onMove);
+  }, [active, within]);
+
+  return near;
+}
+
+function BrandRail({
+  brief: b,
+  submittedDomain,
+  onClose,
+  footer,
+}: {
+  brief: AdBrief;
+  submittedDomain: string;
+  onClose: () => void;
+  footer?: React.ReactNode;
+}) {
   return (
-    <main className="mx-auto w-full max-w-6xl flex-1 space-y-6 px-5 py-8">
-      <BrandBar brief={s.brief} cleanDomain={cleanDomain} onReset={s.reset} />
-
-      {generating && (
-        <div className="animate-fade-up rounded-2xl border border-border bg-card px-4 py-3.5 [animation-delay:80ms]">
-          <div className="flex items-center gap-3">
-            <span className="size-4 shrink-0 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-            <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-semibold text-foreground">
-                Painting {total} on-brand ads
-              </p>
-              <p className="text-[11px] text-muted-foreground">
-                Each ad lands the moment its model finishes · usually 1–3 min ·
-                keep this tab open
-              </p>
-            </div>
-            <div className="hidden shrink-0 items-center gap-3 sm:flex">
-              <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
-                {fmtElapsed(s.elapsed)}
-              </span>
-              <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-brand-washed ring-1 ring-primary/30">
-                {s.doneCount}/{total}
-              </span>
-            </div>
-          </div>
-          <div className="mt-3 h-1 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-brand-blue to-brand-purple transition-all duration-700"
-              style={{ width: `${Math.max(6, (s.doneCount / total) * 100)}%` }}
-            />
-          </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 gap-5 min-[480px]:grid-cols-2 lg:grid-cols-3">
-        {s.slots.map((slot, i) => (
-          <AdCard
-            key={`${slot.concept.model}:${slot.concept.key}:${slot.concept.subject.kind}:${i}`}
-            slot={slot}
-            index={i}
-            onRetry={() => s.retrySlot(i)}
-            onDownload={() => s.downloadAd(i)}
+    <aside className="studio-panel flex w-full shrink-0 flex-col border-b border-white/[0.14] lg:h-[100dvh] lg:w-[292px] lg:border-b-0 lg:border-r">
+      <div className="flex items-center gap-3 border-b border-white/[0.14] px-4 py-3.5">
+        <div className="logo-light grid size-9 shrink-0 place-items-center overflow-hidden rounded-lg">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={
+              b.logoUrl ??
+              `https://www.google.com/s2/favicons?sz=64&domain=${submittedDomain}`
+            }
+            alt=""
+            className="logo-edge max-h-6 max-w-full object-contain"
           />
-        ))}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13.5px] font-semibold text-[#f4f2ef]">
+            {b.brandName}
+          </p>
+          <p className="truncate text-[11px] text-[#8b8b93]">{b.domain}</p>
+        </div>
+        {/* The same mark that brings it back, so the control reads as one
+            toggle in two positions rather than two different buttons. */}
+        <button
+          onClick={onClose}
+          aria-label="Hide the brand panel"
+          title="Hide the brand panel"
+          className="grid size-7 shrink-0 place-items-center rounded-lg text-[#6f6f78] transition hover:bg-white/[0.07] hover:text-[#f4f2ef]"
+        >
+          <PanelIcon className="size-4" />
+        </button>
       </div>
 
-      {s.phase === "done" && (
-        <div className="animate-fade-up flex flex-col items-center gap-3 pt-2">
-          <div className="flex flex-wrap items-center justify-center gap-2.5">
-            {s.doneCount > 0 && (
-              <button onClick={s.downloadAll} className="btn-dark">
-                <DownloadIcon /> Download all {s.doneCount}
-              </button>
-            )}
-            {s.doneCount > 0 && (
-              <button
-                onClick={() => void s.shareToX()}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-black px-4 py-2.5 text-[13px] font-medium text-white transition hover:bg-zinc-800"
-              >
-                <XIcon /> Share on X
-              </button>
-            )}
-            <button onClick={s.reset} className="btn-secondary text-[13px]">
-              <RefreshIcon /> Try another brand
-            </button>
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            Every ad is a 1:1 image — ready for feeds, decks, and campaigns.
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
+        {b.mood && (
+          <RailBlock label="Visual mood">
+            <p className="text-[12px] leading-relaxed text-[#c9c7c2]">{b.mood}</p>
+          </RailBlock>
+        )}
+
+        {b.colors.length > 0 && (
+          <RailBlock label="Palette">
+            <div className="flex gap-1">
+              {b.colors.slice(0, AD_RUN_LIMITS.palette).map((color, index) => (
+                <span
+                  key={`${index}-${color.hex}`}
+                  title={color.hex}
+                  className="h-7 min-w-0 flex-1 rounded-[3px]"
+                  style={{ background: color.hex }}
+                />
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] text-[#8b8b93]">
+              {b.colorA} · {b.colorB}
+            </p>
+          </RailBlock>
+        )}
+
+        <RailBlock label="Typeface">
+          <p
+            className="truncate text-[19px] leading-tight text-[#f4f2ef]"
+            style={{ fontFamily: fontPreviewStack(b.fontFamily) }}
+          >
+            {b.brandName}
           </p>
-        </div>
-      )}
-    </main>
+          <p className="mt-1 truncate text-[11px] text-[#8b8b93]">
+            {b.fontFamily ?? "Not stated"}
+          </p>
+        </RailBlock>
+
+        {b.languages.length > 0 && (
+          <RailBlock label="Language">
+            <div className="flex flex-wrap gap-1">
+              {b.languages.slice(0, 4).map((tag) => (
+                <span
+                  key={tag}
+                  title={languageName(tag)}
+                  className="rounded-[4px] bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-semibold uppercase text-[#c9c7c2]"
+                >
+                  {tag}
+                </span>
+              ))}
+              {b.languages.length > 4 && (
+                <span className="rounded-[4px] bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-semibold text-[#8b8b93]">
+                  +{b.languages.length - 4}
+                </span>
+              )}
+            </div>
+          </RailBlock>
+        )}
+
+        {b.headline && (
+          <RailBlock label="Headline">
+            <p className="text-[12px] leading-relaxed text-[#c9c7c2]">
+              {b.headline}
+            </p>
+          </RailBlock>
+        )}
+      </div>
+
+      <div className="border-t border-white/[0.14] px-4 py-3.5">{footer}</div>
+    </aside>
   );
 }
+
+/**
+ * Everything about the brand, corrected in one place.
+ *
+ * The studio shows the brand rather than asking about it, so the corrections
+ * live behind one button instead of a pencil on every line — there is no
+ * catalogue of cards here to hang them on.
+ */
+function BrandSheet({
+  brief,
+  onCommit,
+  onClose,
+  onReset,
+}: {
+  brief: AdBrief;
+  onCommit: (patch: Partial<AdBrief>) => void;
+  onClose: () => void;
+  onReset: () => void;
+}) {
+  const [draft, setDraft] = useState<AdBrief>(brief);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const patch = (next: Partial<AdBrief>) =>
+    setDraft((was) => ({ ...was, ...next }));
+
+  return (
+    <EditSheet
+      title="Brand"
+      hint="Everything the extract read. Correct anything it got wrong."
+      onClose={onClose}
+      onSave={() => {
+        onCommit(draft);
+        onClose();
+      }}
+    >
+      <div className="max-h-[58vh] space-y-4 overflow-y-auto pr-1">
+        <Field label="Brand name">
+          <input
+            type="text"
+            value={draft.brandName}
+            maxLength={AD_RUN_LIMITS.brandName}
+            onChange={(e) => patch({ brandName: e.target.value })}
+            className="input"
+          />
+        </Field>
+
+        <Field label="Logo">
+          <div className="logo-light mb-2 grid h-24 place-items-center overflow-hidden rounded-xl p-3">
+            {draft.logoUrl ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={draft.logoUrl}
+                alt=""
+                className="logo-edge max-h-full max-w-full object-contain"
+              />
+            ) : (
+              <span className="text-[12px] text-zinc-500">No logo</span>
+            )}
+          </div>
+          <input
+            type="text"
+            value={draft.logoUrl ?? ""}
+            maxLength={AD_RUN_LIMITS.logoUrl}
+            placeholder="https://example.com/logo.png"
+            onChange={(e) => patch({ logoUrl: e.target.value.trim() || null })}
+            className="input"
+          />
+          <div className="mt-2">
+            <LogoUpload
+              onUploaded={(url) => patch({ logoUrl: url })}
+              disabled={uploading}
+              setUploading={setUploading}
+              error={uploadError}
+              setError={setUploadError}
+            />
+          </div>
+        </Field>
+
+        <FontPicker
+          family={draft.fontFamily}
+          brandName={draft.brandName}
+          onChange={(fontFamily) => patch({ fontFamily })}
+        />
+
+        <PaletteEditor
+          colors={draft.colors}
+          colorA={draft.colorA}
+          colorB={draft.colorB}
+          onChange={patch}
+        />
+
+        <LanguagePicker
+          languages={draft.languages}
+          onChange={(languages) => patch({ languages })}
+        />
+
+        <Field label="Headline">
+          <textarea
+            rows={2}
+            value={draft.headline}
+            maxLength={AD_RUN_LIMITS.brandHeadline}
+            placeholder={draft.description || "Not stated"}
+            onChange={(e) => patch({ headline: e.target.value })}
+            className="input resize-none"
+          />
+        </Field>
+
+        <button
+          type="button"
+          onClick={onReset}
+          className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-[12px] text-muted-foreground transition hover:text-foreground"
+        >
+          <RefreshIcon /> Start over with a different brand
+        </button>
+      </div>
+    </EditSheet>
+  );
+}
+
+function RailBlock({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <p className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.13em] text-[#6f6f78]">
+        {label}
+      </p>
+      {children}
+    </div>
+  );
+}
+
 
 /**
  * The brand, stated once beside the catalogue it produced.
@@ -1918,125 +2281,128 @@ function BrandBar({
   );
 }
 
-function AdCard({
-  slot,
-  index,
-  onRetry,
-  onDownload,
+/**
+ * The composer, sat over the sheet rather than above it.
+ *
+ * Only what is wired is shown as working: Generate re-runs the ads, and the
+ * rest of the row states what this run is already set to. A prompt box that
+ * quietly discarded what was typed into it would be worse than no prompt box,
+ * so it says plainly that the words are not read yet.
+ */
+function Composer({
+  onGenerate,
+  busy,
+  busyLabel,
+  action,
+  note,
+  prompt,
+  setPrompt,
+  model,
+  setModel,
+  aspectRatio,
+  setAspectRatio,
 }: {
-  slot: AdSlot;
-  index: number;
-  onRetry: () => void;
-  onDownload: () => void;
+  onGenerate: () => void;
+  busy: boolean;
+  busyLabel: string;
+  action: string;
+  note: string;
+  prompt: string;
+  setPrompt: (next: string) => void;
+  model: ImageModelId;
+  setModel: (next: ImageModelId) => void;
+  aspectRatio: string;
+  setAspectRatio: (next: string) => void;
 }) {
-  const [loaded, setLoaded] = useState(false);
-  const c = slot.concept;
-  const directionLabel = directionByKey(c.key)?.label ?? c.key;
-  const modelName = imageModelById(c.model)?.displayName ?? c.model;
-  const productName = c.subject.kind === "product" ? c.subject.name : null;
-  const sourceImage = c.subject.kind === "product" ? c.subject.imageUrl : null;
-  const model = imageModelById(c.model);
-  const usedAsReference =
-    sourceImage !== null && model !== undefined && takesProductPhoto(model);
-  const cardTitle = productName ?? directionLabel;
-  const subjectLabel = productName ? `Product · ${directionLabel}` : "Company";
-  const imageAlt = productName
-    ? `${productName} product ad in the ${directionLabel} creative direction`
-    : `Company ad in the ${directionLabel} creative direction`;
-
   return (
-    <div
-      className="group animate-fade-up overflow-hidden rounded-2xl border border-border bg-card shadow-card"
-      style={{ animationDelay: `${index * 60}ms` }}
-    >
-      <div className="flex items-center justify-between gap-2 border-b border-border px-3.5 py-2.5">
-        <div className="min-w-0">
-          <p className="truncate text-[13px] font-semibold text-foreground">
-            {cardTitle}
-          </p>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {subjectLabel} · “{c.headline}”
-          </p>
-        </div>
-        <span className="shrink-0 rounded-full bg-muted/60 px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
-          {modelName}
-        </span>
-      </div>
-
-      <div className="relative aspect-square">
-        {slot.status === "done" && slot.url ? (
-          <>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={slot.url}
-              alt={imageAlt}
-              onLoad={() => setLoaded(true)}
-              className={`size-full object-cover transition-all duration-700 ${loaded ? "scale-100 opacity-100 blur-0" : "scale-[1.03] opacity-0 blur-md"}`}
-            />
-            <div className="absolute inset-x-0 bottom-0 flex justify-end bg-gradient-to-t from-black/60 to-transparent p-3 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
-              <button
-                onClick={onDownload}
-                className="btn-dark px-3 py-1.5 text-[12px]"
-              >
-                <DownloadIcon /> Download
-              </button>
-            </div>
-          </>
-        ) : slot.status === "error" ? (
-          <div className="flex size-full flex-col items-center justify-center gap-3 bg-white/[0.02] p-6 text-center">
-            <p className="text-[13px] font-semibold text-foreground">
-              This one didn&apos;t render
-            </p>
-            <p className="max-w-[220px] text-[11px] leading-relaxed text-muted-foreground">
-              The model hiccuped. Retry this slot without changing your other
-              ads.
-            </p>
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-4 pb-4">
+      <div className="pointer-events-auto mx-auto w-full max-w-3xl">
+        <div className="studio-panel rounded-[16px] border border-white/[0.14] shadow-[0_18px_50px_-24px_rgba(0,0,0,0.9)]">
+          <div className="flex items-start gap-2 px-3 pt-3">
             <button
-              onClick={onRetry}
-              className="btn-secondary px-3 py-1.5 text-[12px]"
+              type="button"
+              title="Attach a reference image — not wired to the run yet"
+              className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg text-[#6f6f78] transition hover:bg-white/[0.06] hover:text-[#c9c7c2]"
             >
-              <RefreshIcon /> Retry
+              <ImageIcon />
+            </button>
+            <textarea
+              rows={1}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (!busy && prompt.trim()) onGenerate();
+                }
+              }}
+              placeholder="Describe the image you want to create…"
+              className="max-h-28 min-h-[28px] flex-1 resize-none bg-transparent py-1 text-[13.5px] text-[#f4f2ef] outline-none placeholder:text-[#6f6f78]"
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5 px-3 pb-2.5 pt-1.5">
+            <ComposerSelect
+              label="Model"
+              value={model}
+              onChange={(v) => setModel(v as ImageModelId)}
+              options={IMAGE_MODELS.map((m) => ({
+                value: m.id,
+                label: m.displayName,
+              }))}
+            />
+            <ComposerSelect
+              label="Ratio"
+              value={aspectRatio}
+              onChange={setAspectRatio}
+              options={["1:1", "4:5", "16:9", "9:16"].map((r) => ({
+                value: r,
+                label: r,
+              }))}
+            />
+            <div className="flex-1" />
+            <button
+              onClick={onGenerate}
+              disabled={busy}
+              className="rounded-lg bg-[#6d28d9] px-3.5 py-1.5 text-[12.5px] font-medium text-white transition hover:bg-[#7c3aed] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {busy ? busyLabel : action}
             </button>
           </div>
-        ) : (
-          <div className="relative size-full">
-            <Shimmer />
-            <div className="absolute inset-0 grid place-items-center">
-              <span className="size-5 animate-spin rounded-full border-2 border-primary/70 border-t-transparent" />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* The shop's own photograph of this product. Shown so the ad above can be
-          judged against the real article instead of taken on trust — and it says
-          whether this model was actually given it, since only some accept one. */}
-      {sourceImage ? (
-        <div className="flex items-start gap-2.5 border-t border-border px-3 py-2.5">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={sourceImage}
-            alt={`${productName} as photographed on the brand's own site`}
-            className="size-10 shrink-0 rounded-md border border-border bg-white object-contain"
-          />
-          <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {usedAsReference
-                ? "Real product · sent as reference"
-                : "Real product · not sent (model takes text only)"}
-            </p>
-            <a
-              href={sourceImage}
-              target="_blank"
-              rel="noreferrer noopener"
-              title={sourceImage}
-              className="block truncate font-mono text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
-            >
-              {sourceImage}
-            </a>
-          </div>
         </div>
-      ) : null}
+        <p className="mt-1.5 text-center text-[10.5px] text-[#5c5c65]">{note}</p>
+      </div>
     </div>
   );
 }
+
+function ComposerSelect({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  options: readonly { value: string; label: string }[];
+}) {
+  return (
+    <label className="hidden items-center gap-1 rounded-lg border border-white/[0.1] px-2 py-1 text-[11px] transition hover:border-white/20 sm:inline-flex">
+      <span className="text-[#6f6f78]">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="cursor-pointer bg-transparent text-[#c9c7c2] outline-none [&>option]:bg-[#151517]"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+

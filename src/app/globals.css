@@ -76,6 +76,17 @@
      cannot be read to find out how dark it is. A hairline shadow needs no such
      knowledge — it traces whatever silhouette is there, which is enough to see
      a white mark on white, and is imperceptible behind a dark one. */
+  /* The generation page runs darker than the rest of the app: the work is
+     photographs, and every surface around them is competition for the eye. */
+  .studio-bg {
+    background-color: #0b0b0c;
+  }
+  .studio-panel {
+    background-color: #151517;
+  }
+  .studio-hairline {
+    border-color: rgb(255 255 255 / 0.14);
+  }
   .logo-edge {
     filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.85))
       drop-shadow(0 0 2px rgba(0, 0, 0, 0.5))
