@@ -88,6 +88,7 @@ describe("Brief concept planning", () => {
         model,
         brief,
         photographed([1]),
+        "",
       );
 
       // Only two of three Product-slot models accept a reference, so the one
@@ -105,6 +106,7 @@ describe("Brief concept planning", () => {
         model,
         brief,
         photographed([0, 1]),
+        "",
       );
 
       for (const concept of productSlots(concepts)) {
@@ -120,7 +122,12 @@ describe("Brief concept planning", () => {
     it("leaves a Product with no photograph on any direction", async () => {
       mocks.generateObject.mockRejectedValue(new Error("planner unavailable"));
 
-      const concepts = await pickConceptsAndCraftCopy(model, brief, photographed([]));
+      const concepts = await pickConceptsAndCraftCopy(
+        model,
+        brief,
+        photographed([]),
+        "",
+      );
 
       expect(concepts).toHaveLength(3 + PRODUCTS.length);
       expect(new Set(concepts.map(({ key }) => key)).size).toBe(concepts.length);
@@ -133,7 +140,7 @@ describe("Brief concept planning", () => {
       mocks.generateObject.mockRejectedValue(new Error("Gateway unavailable"));
       const products = PRODUCTS.slice(0, productCount);
 
-      const concepts = await pickConceptsAndCraftCopy(model, brief, products);
+      const concepts = await pickConceptsAndCraftCopy(model, brief, products, "");
 
       expect(concepts).toHaveLength(3 + productCount);
       expect(new Set(concepts.map(({ key }) => key)).size).toBe(
@@ -206,7 +213,7 @@ describe("Brief concept planning", () => {
     });
 
     const products = PRODUCTS.slice(0, 2);
-    const concepts = await pickConceptsAndCraftCopy(model, brief, products);
+    const concepts = await pickConceptsAndCraftCopy(model, brief, products, "");
 
     expect(concepts).toHaveLength(5);
     expect(new Set(concepts.map(({ key }) => key)).size).toBe(5);
@@ -267,7 +274,7 @@ describe("Brief concept planning", () => {
     ],
   ])("rejects a Product count outside the 1-3 contract", async (products) => {
     await expect(
-      pickConceptsAndCraftCopy(model, brief, products),
+      pickConceptsAndCraftCopy(model, brief, products, ""),
     ).rejects.toThrow("Concept planning requires 1-3 Products");
     expect(mocks.generateObject).not.toHaveBeenCalled();
   });

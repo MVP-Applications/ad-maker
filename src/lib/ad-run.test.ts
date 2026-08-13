@@ -64,6 +64,8 @@ const concepts: PlannedConcept[] = CREATIVE_DIRECTIONS.slice(0, 6).map(
     subject: subjectFor(index),
     headline: `Concept ${index + 1}`,
     subheadline: "A concise supporting line",
+    instruction: "",
+    showsPeople: false,
   }),
 );
 
@@ -201,6 +203,89 @@ test.each([
   ],
 ])("rejects a Brief with %s", (_label, build) => {
   expect(() => decodeAdRunBrief(build())).toThrow();
+});
+
+// The request is the one field a person types, and the ad URL is the only
+// channel that reaches the renderer, so it has to survive the round trip.
+test("round-trips the buyer's request through the canonical ad href", () => {
+  const asked: PlannedConcept = {
+    ...concepts[0],
+    subject: { ...concepts[0].subject },
+    instruction: "on a marble table beside dried roses",
+    showsPeople: false,
+  };
+
+  const href = renderedAdHref(brief, asked);
+  const decoded = decodeRenderedAdQuery(href);
+
+  expect(href).toContain("ask=on+a+marble+table");
+  expect(decoded.instruction).toBe("on a marble table beside dried roses");
+  expect(decoded.showsPeople).toBe(false);
+  expect(decoded.canonicalHref).toBe(href);
+});
+
+test("round-trips a request that asks for a person", () => {
+  const asked: PlannedConcept = {
+    ...concepts[0],
+    subject: { ...concepts[0].subject },
+    instruction: "a man walking through an airport",
+    showsPeople: true,
+  };
+
+  const decoded = decodeRenderedAdQuery(renderedAdHref(brief, asked));
+
+  expect(decoded.showsPeople).toBe(true);
+  expect(decoded.instruction).toBe("a man walking through an airport");
+});
+
+// Ads made before the request box existed carry neither parameter, and their
+// URLs — and so their CDN entries — must not change under them.
+test("omits both parameters when nothing was asked", () => {
+  const href = renderedAdHref(brief, concepts[0]);
+
+  expect(href).not.toContain("ask=");
+  expect(href).not.toContain("people=");
+  const decoded = decodeRenderedAdQuery(href);
+  expect(decoded.instruction).toBe("");
+  expect(decoded.showsPeople).toBe(false);
+});
+
+test("round-trips a request written in Arabic", () => {
+  const asked: PlannedConcept = {
+    ...concepts[0],
+    subject: { ...concepts[0].subject },
+    instruction: "على طاولة رخامية بجانب ورود مجففة",
+    showsPeople: false,
+  };
+
+  expect(
+    decodeRenderedAdQuery(renderedAdHref(brief, asked)).instruction,
+  ).toBe("على طاولة رخامية بجانب ورود مجففة");
+});
+
+test.each([
+  [
+    "a request beyond the shared bound",
+    { instruction: "x".repeat(AD_RUN_LIMITS.instruction + 1) },
+  ],
+  ["a non-string request", { instruction: 42 }],
+  ["a non-boolean people flag", { showsPeople: "yes" }],
+])("rejects a Concept with %s", (_label, patch) => {
+  const candidate = plan(4);
+  Object.assign(candidate.concepts[0], patch);
+
+  expect(() => decodeAdRunPlan(candidate)).toThrow();
+});
+
+test("rejects a people parameter that is not 1", () => {
+  const href = renderedAdHref(brief, {
+    ...concepts[0],
+    subject: { ...concepts[0].subject },
+    instruction: "",
+    showsPeople: true,
+  });
+
+  expect(() => decodeRenderedAdQuery(href.replace("people=1", "people=0"))).toThrow();
 });
 
 test.each([4, 5, 6] as const)(

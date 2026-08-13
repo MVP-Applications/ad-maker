@@ -97,6 +97,22 @@ export type PlannedConcept = {
   subject: ConceptSubject;
   headline: string;
   subheadline: string;
+  /**
+   * What the person asked this run for, in their words, carried per Concept.
+   *
+   * Per Concept rather than per Ad Run because a Rendered Ad is generated from
+   * its URL alone — nothing else survives the trip to the renderer. Empty when
+   * nothing was asked, which is every run that predates the request box.
+   */
+  instruction: string;
+  /**
+   * Whether this Concept is meant to show a person.
+   *
+   * Decided by the planner, which reads the instruction, rather than by
+   * matching words here: the request arrives in the shop's own language, and a
+   * list of English words for "man" would silently fail every Arabic brand.
+   */
+  showsPeople: boolean;
 };
 
 /**
@@ -121,6 +137,8 @@ export type RenderedAdQuery = {
   subject: ConceptSubject;
   headline: string;
   subheadline: string;
+  instruction: string;
+  showsPeople: boolean;
   brandName: string;
   colorA: string;
   colorB: string;
@@ -449,9 +467,23 @@ function decodeConcept(value: unknown): PlannedConcept {
   const concept = record(value, "concept");
   onlyKeys(
     concept,
-    ["key", "model", "subject", "headline", "subheadline"],
+    [
+      "key",
+      "model",
+      "subject",
+      "headline",
+      "subheadline",
+      "instruction",
+      "showsPeople",
+    ],
     "concept",
   );
+  if (
+    concept.showsPeople !== undefined &&
+    typeof concept.showsPeople !== "boolean"
+  ) {
+    invalid("concept.showsPeople must be a boolean");
+  }
   const headline = text(concept.headline, "concept.headline", {
     min: 1,
     max: AD_RUN_LIMITS.headline,
@@ -474,6 +506,16 @@ function decodeConcept(value: unknown): PlannedConcept {
     subject: decodeSubject(concept.subject),
     headline,
     subheadline,
+    // Absent means nothing was asked for, which is the whole history of Ad Runs
+    // before the request box existed.
+    instruction:
+      concept.instruction === undefined
+        ? ""
+        : text(concept.instruction, "concept.instruction", {
+            max: AD_RUN_LIMITS.instruction,
+            trim: true,
+          }),
+    showsPeople: concept.showsPeople === true,
   };
 }
 
@@ -586,6 +628,8 @@ const RENDERED_AD_QUERY_KEYS = [
   "mood",
   "font",
   "logo",
+  "ask",
+  "people",
 ] as const;
 
 function encodeRenderedAdQuery(query: Omit<RenderedAdQuery, "canonicalHref">): string {
@@ -612,6 +656,10 @@ function encodeRenderedAdQuery(query: Omit<RenderedAdQuery, "canonicalHref">): s
   params.set("mood", query.mood);
   if (query.fontFamily) params.set("font", query.fontFamily);
   if (query.logoUrl) params.set("logo", query.logoUrl);
+  // Absent rather than empty when nothing was asked, so a run made without the
+  // request box keeps the URL — and the CDN entry — it has always had.
+  if (query.instruction) params.set("ask", query.instruction);
+  if (query.showsPeople) params.set("people", "1");
   return `/api/ad?${params.toString()}`;
 }
 
@@ -636,6 +684,8 @@ export function renderedAdHref(brief: AdBrief, concept: PlannedConcept): string 
     subject: validConcept.subject,
     headline: validConcept.headline,
     subheadline: validConcept.subheadline,
+    instruction: validConcept.instruction,
+    showsPeople: validConcept.showsPeople,
     brandName: validBrief.brandName,
     colorA: validBrief.colorA,
     colorB: validBrief.colorB,
@@ -696,6 +746,10 @@ export function decodeRenderedAdQuery(input: URL | URLSearchParams | string): Re
     if (params.getAll(key).length !== 1) invalid(`${key} must appear exactly once`);
   }
 
+  if (params.has("people") && params.get("people") !== "1") {
+    invalid("people must be 1 when present");
+  }
+
   const subject = decodeQuerySubject(params);
   const copy = decodeConcept({
     key: requiredParameter(params, "concept"),
@@ -703,6 +757,10 @@ export function decodeRenderedAdQuery(input: URL | URLSearchParams | string): Re
     subject,
     headline: requiredParameter(params, "headline"),
     subheadline: requiredParameter(params, "sub"),
+    ...(params.has("ask")
+      ? { instruction: requiredParameter(params, "ask") }
+      : {}),
+    showsPeople: params.has("people"),
   });
 
   const query = {
@@ -712,6 +770,8 @@ export function decodeRenderedAdQuery(input: URL | URLSearchParams | string): Re
     subject,
     headline: copy.headline,
     subheadline: copy.subheadline,
+    instruction: copy.instruction,
+    showsPeople: copy.showsPeople,
     brandName: text(requiredParameter(params, "name"), "name", {
       min: 1,
       max: AD_RUN_LIMITS.brandName,

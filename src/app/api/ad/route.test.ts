@@ -32,6 +32,8 @@ const concept: PlannedConcept = {
   subject: { kind: "company" },
   headline: "Move money",
   subheadline: "Financial infrastructure for every business",
+  instruction: "",
+  showsPeople: false,
 };
 
 const productConcept: PlannedConcept = {
@@ -45,6 +47,8 @@ const productConcept: PlannedConcept = {
   },
   headline: "Accept Anything",
   subheadline: "Payments built for every way customers pay",
+  instruction: "",
+  showsPeople: false,
 };
 
 const href = renderedAdHref(brief, concept);

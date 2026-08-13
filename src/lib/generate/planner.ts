@@ -61,6 +61,7 @@ export type ConceptPlanningAdapter = {
   planConcepts(
     brief: AdBrief,
     products: readonly Product[],
+    instruction: string,
     signal?: AbortSignal,
   ): Promise<readonly PlannedConcept[]>;
 };
@@ -75,13 +76,27 @@ export type AdRunBriefResearcher = (
   signal?: AbortSignal,
 ) => Promise<AdRunBriefResult>;
 
+/**
+ * A Brief plus what the buyer asked of it. The Brief describes a shop and is
+ * cacheable; the request is one person's, for one run, and never is.
+ */
+export type AdRunConceptRequest = AdRunBrief & { instruction?: unknown };
+
 export type AdRunConceptPlanner = (
-  input: AdRunBrief,
+  input: AdRunConceptRequest,
   signal?: AbortSignal,
 ) => Promise<AdRunPlanningResult>;
 
 const bounded = (value: string | null | undefined, max: number): string =>
   (value ?? "").trim().slice(0, max);
+
+/**
+ * The request is the one field a person types, so it is the one field that is
+ * neither extracted nor validated by the Brief contract. Bounded here, before
+ * it reaches a model or a URL.
+ */
+const boundedInstruction = (value: unknown): string =>
+  typeof value === "string" ? bounded(value, AD_RUN_LIMITS.instruction) : "";
 
 /**
  * One research call now carries what four used to, so its failure has to say
@@ -230,13 +245,18 @@ export function createConceptPlanner(
         return { ok: false, error: { code: "not-configured" } };
       }
 
-      const { brief, products } = decodeAdRunBrief(input);
+      const { brief, products } = decodeAdRunBrief({
+        brief: input.brief,
+        products: input.products,
+      });
+      const instruction = boundedInstruction(input.instruction);
       const advertised = products
         .filter(({ flagship }) => flagship)
         .slice(0, AD_PRODUCT_CONCEPT_MAX);
       const concepts = await adapters.concepts.planConcepts(
         brief,
         advertised,
+        instruction,
         signal,
       );
       if (signal?.aborted) return { ok: false, error: { code: "aborted" } };
@@ -259,11 +279,12 @@ const productionAdapters: AdRunPlannerAdapters = {
   },
   concepts: {
     isReady: hasGatewayConfiguration,
-    planConcepts: (brief, products, signal) =>
+    planConcepts: (brief, products, instruction, signal) =>
       pickConceptsAndCraftCopy(
         gatewayTextModel("openai/gpt-5.4-mini"),
         brief,
         products,
+        instruction,
         signal,
       ),
   },

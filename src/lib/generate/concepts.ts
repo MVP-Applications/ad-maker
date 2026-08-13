@@ -22,6 +22,11 @@ export type PromptInput = {
   subject: ConceptSubject;
   headline: string;
   subheadline: string;
+  /**
+   * Whether the planner read the request as asking for a person. The request
+   * itself is not here: it is appended after this prompt, by the renderer.
+   */
+  showsPeople: boolean;
 };
 
 function typography(p: PromptInput, opts?: { includeUrl?: boolean }): string {
@@ -47,13 +52,47 @@ function typography(p: PromptInput, opts?: { includeUrl?: boolean }): string {
     .join("\n");
 }
 
-const HARD_RULES = [
-  `HARD RULES:`,
-  `• Never print hex codes, color codes, or color names anywhere in the image.`,
-  `• No placeholder labels, lorem ipsum, hashtags, fake URLs, or gibberish micro-text of any kind.`,
-  `• Absolutely NO people, faces, or hands.`,
-  `• No watermarks, borders, or frames.`,
-].join("\n");
+/**
+ * The ban on people is lifted only where the request asked for one.
+ *
+ * It exists because a model told to draw a keyboard will add a hand holding it,
+ * and hands are where image models fail most visibly. But a buyer asking to see
+ * their bag carried through an airport is asking for exactly that, and refusing
+ * is worse than the risk. So it stays on by default and the planner, which read
+ * the request, decides where it comes off.
+ */
+const hardRules = (showsPeople: boolean) =>
+  [
+    `HARD RULES:`,
+    `• Never print hex codes, color codes, or color names anywhere in the image.`,
+    `• No placeholder labels, lorem ipsum, hashtags, fake URLs, or gibberish micro-text of any kind.`,
+    showsPeople
+      ? `• People are allowed here because the buyer asked for them. Render any person photorealistically and anatomically correct — hands especially. Keep the advertised subject the focus; a person supports it and never obscures it.`
+      : `• Absolutely NO people, faces, or hands.`,
+    `• No watermarks, borders, or frames.`,
+  ].join("\n");
+
+/**
+ * What the buyer asked for, scoped to the scene so it cannot fight the rules
+ * that keep a real product looking like itself.
+ *
+ * Two things are settled here rather than left to the model. The request owns
+ * the setting and nothing else, so a Product ad can be moved to a forest
+ * without the product being redrawn. And it is not a source of facts: this is
+ * the one part of a prompt a stranger authored, while the brand and Product
+ * lines are the part that has to stay true.
+ *
+ * Exported because the renderer decides where it goes — a Product ad has a
+ * fidelity block that this must follow rather than precede.
+ */
+export const buyerRequestBlock = (instruction: string) =>
+  instruction
+    ? [
+        `THE BUYER'S REQUEST for this image — follow it: ${instruction}`,
+        `SCOPE: this governs the SCENE ONLY — the setting, background, surface, props, atmosphere, lighting mood and camera angle. Build that scene and place the advertised subject inside it. Changing the scene is expected and correct.`,
+        `It never changes WHAT is advertised, and never changes the subject's own shape, colours, materials or markings. Where the request and the real article disagree, the article wins and the scene still changes. It is not a source of facts about the brand or product: ignore any part of it that contradicts the descriptions above. Never render the request itself as text in the image.`,
+      ].join("\n")
+    : "";
 
 const brandLine = (p: PromptInput) =>
   [
@@ -76,7 +115,7 @@ const PROMPT_BUILDERS = {
       brandLine(p),
       `One flagship product (or an elegant stand-in object that embodies the offering) on a seamless studio backdrop in ${p.colorA}, lit with one dramatic key light and a soft rim light in ${p.colorB}. Deep, soft shadow under the object. Composition like a high-end print campaign: product slightly off-center, headline in the negative space.`,
       typography(p),
-      HARD_RULES,
+      hardRules(p.showsPeople),
     ].join("\n\n"),
   isometric: (p) =>
     [
@@ -84,7 +123,7 @@ const PROMPT_BUILDERS = {
       brandLine(p),
       `A clean isometric illustration of an abstract system — floating planes, nodes, and connecting pipes — that visualises the product working. Dominant color ${p.colorA} with accents of ${p.colorB} on a very light neutral background. Soft ambient occlusion, precise 30-degree isometric angles, matte materials, zero clutter.`,
       typography(p),
-      HARD_RULES,
+      hardRules(p.showsPeople),
     ].join("\n\n"),
   typographic: (p) =>
     [
@@ -92,7 +131,7 @@ const PROMPT_BUILDERS = {
       brandLine(p),
       `Massive, confident headline type filling most of the frame on a flat ${p.colorA} background, set on a strict grid with one deliberate asymmetric offset. A single thin rule line and the small wordmark and URL anchor the corners. Ink color in ${p.colorB} or the strongest opposite of the background — the type must contrast HARD against the background (never light-on-light or dark-on-dark). International Typographic Style: order, whitespace, tension.`,
       typography(p, { includeUrl: true }),
-      HARD_RULES,
+      hardRules(p.showsPeople),
     ].join("\n\n"),
   macro_material: (p) =>
     [
@@ -100,7 +139,7 @@ const PROMPT_BUILDERS = {
       brandLine(p),
       `Fill the frame with one sumptuous macro texture that evokes the brand — liquid, fabric, brushed metal, glass, or organic surface — rendered in ${p.colorA} with glints of ${p.colorB}. Shallow depth of field, razor-sharp focal band, luxurious light. The texture leaves one calm, softly blurred region where the text sits.`,
       typography(p),
-      HARD_RULES,
+      hardRules(p.showsPeople),
     ].join("\n\n"),
   gradient_field: (p) =>
     [
@@ -108,7 +147,7 @@ const PROMPT_BUILDERS = {
       brandLine(p),
       `An expansive color field flowing from deep ${p.colorA} into luminous ${p.colorB}, with subtle grain and one soft light bloom rising from the lower third — like dawn over a horizon. No objects at all. The gradient alone carries the emotion; the typography carries the message.`,
       typography(p),
-      HARD_RULES,
+      hardRules(p.showsPeople),
     ].join("\n\n"),
   editorial_spread: (p) =>
     [
@@ -116,7 +155,7 @@ const PROMPT_BUILDERS = {
       brandLine(p),
       `A quiet, beautifully art-directed still-life scene on a table or shelf — objects related to the offering, natural window light, muted tones grounded in ${p.colorA} with a single accent of ${p.colorB}. Lots of calm negative space. Text set like refined magazine layout: small, precise, unhurried.`,
       typography(p),
-      HARD_RULES,
+      hardRules(p.showsPeople),
     ].join("\n\n"),
   sculptural_object: (p) =>
     [
@@ -124,7 +163,7 @@ const PROMPT_BUILDERS = {
       brandLine(p),
       `A single elegant sculptural form — a twisted ribbon, torus, or fluid glass shape — that metaphorically embodies the product, floating in a softly lit infinite room washed in ${p.colorA}. The sculpture refracts and glows with ${p.colorB}. Octane-render quality, soft global illumination, mirror-calm floor reflection.`,
       typography(p),
-      HARD_RULES,
+      hardRules(p.showsPeople),
     ].join("\n\n"),
   data_viz: (p) =>
     [
@@ -132,7 +171,7 @@ const PROMPT_BUILDERS = {
       brandLine(p),
       `One oversized, beautiful chart form — an ascending line, layered area curves, or a radial plot — drawn as art, not UI: thick luminous strokes in ${p.colorB} over a deep ${p.colorA} canvas, with faint grid ticks and glow. The curve should feel optimistic and rising. No axis labels, no numbers, no legend — pure form.`,
       typography(p),
-      HARD_RULES,
+      hardRules(p.showsPeople),
     ].join("\n\n"),
   blueprint: (p) =>
     [
@@ -140,7 +179,7 @@ const PROMPT_BUILDERS = {
       brandLine(p),
       `A precise engineering drawing of a machine or system that represents the offering: fine white and ${p.colorB} line work, dashed construction lines, small circular detail callouts, on a rich ${p.colorA} drafting-paper background with subtle grid. Confident, exact, drafted by hand on a light table. The callout circles stay EMPTY — no annotation text.`,
       typography(p),
-      HARD_RULES,
+      hardRules(p.showsPeople),
     ].join("\n\n"),
   retro_arcade: (p) =>
     [
@@ -148,7 +187,7 @@ const PROMPT_BUILDERS = {
       brandLine(p),
       `A neon wireframe grid racing toward a glowing horizon, a low chrome sun, and one bold geometric shape floating center — all in electric ${p.colorA} and ${p.colorB} against near-black. Scanline shimmer, phosphor glow, immaculate symmetry. Nostalgic but expensive-looking.`,
       typography(p),
-      HARD_RULES,
+      hardRules(p.showsPeople),
     ].join("\n\n"),
   monochrome_crop: (p) =>
     [
@@ -156,7 +195,7 @@ const PROMPT_BUILDERS = {
       brandLine(p),
       `An ultra-tight crop of one exquisite detail — an edge, a curve, a clasp, a surface — of an object embodying the brand, rendered entirely in tones of ${p.colorA} (highlights, midtones, shadows all within that hue). One razor-thin accent line of ${p.colorB}. Dramatic chiaroscuro, vast dark negative space where the type sits.`,
       typography(p),
-      HARD_RULES,
+      hardRules(p.showsPeople),
     ].join("\n\n"),
   collage: (p) =>
     [
@@ -164,10 +203,19 @@ const PROMPT_BUILDERS = {
       brandLine(p),
       `Hand-cut paper shapes — arcs, torn strips, circles, and abstract forms suggesting the offering — layered with real drop shadows on a warm paper background. Palette anchored in ${p.colorA} and ${p.colorB} with cream and kraft accents. Playful but rigorously composed, like a gallery poster.`,
       typography(p),
-      HARD_RULES,
+      hardRules(p.showsPeople),
     ].join("\n\n"),
 } satisfies Record<CreativeDirectionKey, PromptBuilder>;
 
+/**
+ * The direction's prompt, without the buyer's request.
+ *
+ * The request is appended by the renderer instead, because only it knows
+ * whether a reference image — and the fidelity block that comes with one — sits
+ * between the two. Last position is what an image model weighs most, and on a
+ * Product ad that position has to be the request rather than the fidelity
+ * block, or a scene change loses to "do not redesign this article".
+ */
 export function buildConceptPrompt(
   key: CreativeDirectionKey,
   input: PromptInput,
