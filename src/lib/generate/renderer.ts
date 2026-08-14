@@ -298,7 +298,8 @@ async function generateImage(
         {
           path: request.attachment.path,
           prompt: request.prompt,
-          imageUrl: request.attachment.url,
+          // One article per Rendered Ad, where the studio may send several.
+          imageUrls: [request.attachment.url],
           aspectRatio: "1:1",
         },
         signal,

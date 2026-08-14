@@ -166,9 +166,9 @@ function fallbackCopy(name: string, description: string): Omit<CopyPick, "key"> 
 /**
  * Spend the models that accept a reference on the Products that have a photo.
  *
- * Only two of the three Product-slot models take an image, and a Product may
- * have no photograph — left to chance the capability lands on a Product with
- * nothing to send while one with a real shot gets a text-only model. Returns
+ * All three Product-slot models take an image, but a Product may have no
+ * photograph — left to chance a Product with a real shot could still be paired
+ * with a slot whose model cannot use it, were the tiers ever to change. Returns
  * one model per Product, in Product order.
  */
 function pairModelsToPhotos(

@@ -7,12 +7,13 @@ import {
   oneArticleFidelity,
 } from "@/lib/generate/fidelity";
 import {
+  falEditImage,
   gatewayImageModel,
   hasGatewayConfiguration,
 } from "@/lib/generate/gateway";
 import {
   imageModelById,
-  takesProductPhoto,
+  photographCapacity,
   type ImageModel,
   type ImageModelId,
 } from "@/lib/generate/models";
@@ -49,9 +50,10 @@ const fail = (message: string, status: number) =>
 /**
  * How many Products one image may name.
  *
- * Two real photographs composed faithfully on gpt-image-1.5 — both bottles, own
- * caps, own labels, nothing invented. Ten is untested and every one costs upload
- * size and latency, so the ceiling starts here and moves on evidence.
+ * A ceiling on the picture rather than on any model — fal's editing path takes
+ * fourteen references and gpt-image five, but an advertisement holding five
+ * distinct articles is already crowded, and each one costs upload size and
+ * latency. Raise it when an image wants it, not because a provider allows it.
  */
 const MENTION_MAX = 5;
 
@@ -64,8 +66,18 @@ type MentionedProduct = {
   currency: string | null;
 };
 
-/** One Product and the photograph of it that will travel with the prompt. */
-type Photographed = { product: MentionedProduct; bytes: Uint8Array };
+/**
+ * One Product and the photograph of it that will travel with the prompt.
+ *
+ * Both forms of the same picture: `bytes` rides along with the prompt on a
+ * model that takes one, and `url` is what fal's editing path is given, which is
+ * the only way those models look at a reference at all.
+ */
+type Photographed = {
+  product: MentionedProduct;
+  bytes: Uint8Array;
+  url: string;
+};
 
 /** Name, price and description on one line, however the Product is being shown. */
 function productLine(product: MentionedProduct): string {
@@ -233,23 +245,31 @@ async function loadPhotographs(
   products: readonly MentionedProduct[],
   signal: AbortSignal,
 ): Promise<Photographed[]> {
-  if (!takesProductPhoto(model) || model.reference.kind !== "native") return [];
+  const capacity = photographCapacity(model);
+  if (capacity === 0) return [];
 
   const loaded = await Promise.all(
     products.map(async (product) => {
       if (!product.imageUrl) return null;
       try {
-        // Null for a URL the policy turned down, which costs the same as a
+        // Loaded even where only the URL is sent onward: this is the check that
+        // the address is a public, size-bounded raster, and it must run either
+        // way. Null for a URL the policy turned down, which costs the same as a
         // throw here: a Product named in words but not shown.
         const raster = await fetchPublicRaster(product.imageUrl, signal);
-        return raster ? { product, bytes: raster.bytes } : null;
+        return raster
+          ? { product, bytes: raster.bytes, url: product.imageUrl }
+          : null;
       } catch {
         return null;
       }
     }),
   );
 
-  return loaded.flatMap((entry) => (entry ? [entry] : []));
+  // Beyond what the model can be shown, a Product keeps its name and loses its
+  // likeness — which the prompt then says plainly rather than attaching a
+  // photograph the model was never going to look at.
+  return loaded.flatMap((entry) => (entry ? [entry] : [])).slice(0, capacity);
 }
 
 export async function POST(req: Request) {
@@ -301,6 +321,37 @@ export async function POST(req: Request) {
   });
 
   try {
+    /**
+     * fal's editing path, for the models that reach a reference no other way.
+     * The Ad Run has sent one product photograph down it since it was written,
+     * and gets the real article back; the AI SDK cannot reach it, so this is a
+     * direct REST call that answers with the finished bytes rather than a
+     * generation result.
+     */
+    if (model.reference.kind === "fal_edit" && photographs.length > 0) {
+      const edited = await falEditImage(
+        {
+          path: model.reference.path,
+          prompt: composed,
+          imageUrls: photographs.map(({ url }) => url),
+          aspectRatio:
+            shape.kind === "aspect_ratio" ? shape.aspectRatio : "1:1",
+        },
+        req.signal,
+      );
+
+      if (edited.bytes.byteLength === 0) {
+        return fail("The model returned nothing.", 502);
+      }
+
+      return new NextResponse(Buffer.from(edited.bytes), {
+        headers: {
+          "Content-Type": edited.mediaType || "image/png",
+          ...NO_STORE,
+        },
+      });
+    }
+
     const { image } = await generateImage({
       model: gatewayImageModel(model.id),
       prompt:

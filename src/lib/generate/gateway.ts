@@ -3,6 +3,7 @@ import "server-only";
 import { createFal } from "@ai-sdk/fal";
 import { createOpenAI } from "@ai-sdk/openai";
 import type { ImageModel, LanguageModel } from "ai";
+import type { AspectRatio } from "./shape";
 
 /**
  * Direct provider keys, one per routing prefix used in the Image Model
@@ -64,8 +65,17 @@ const FAL_RESULT_MAX_BYTES = 25 * 1024 * 1024;
 export type FalEditRequest = {
   path: string;
   prompt: string;
-  imageUrl: string;
-  aspectRatio: "1:1";
+  /**
+   * Every article the picture is to contain, in the order the prompt numbers
+   * them. fal takes a list here and documents fourteen; the Ad Run sends one
+   * and the studio sends what was named.
+   */
+  imageUrls: readonly string[];
+  /**
+   * Every shape a fal model is offered. The Ad Run only ever asks for a square;
+   * the studio lets a person choose, and these endpoints take the ratio by name.
+   */
+  aspectRatio: AspectRatio;
 };
 
 function statusError(message: string, status: number): Error {
@@ -84,7 +94,7 @@ export async function falEditImage(
     },
     body: JSON.stringify({
       prompt: request.prompt,
-      image_urls: [request.imageUrl],
+      image_urls: request.imageUrls,
       aspect_ratio: request.aspectRatio,
       num_images: 1,
     }),

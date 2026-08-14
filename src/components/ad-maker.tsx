@@ -52,7 +52,9 @@ import { researchStage } from "@/lib/research-stages";
 import {
   IMAGE_MODELS,
   imageModelById,
+  photographCapacity,
   takesProductPhoto,
+  type ImageModel,
   type ImageModelId,
 } from "@/lib/generate/models";
 import {
@@ -1813,6 +1815,9 @@ function Studio({ s }: { s: StudioController }) {
           aspectRatio={aspectRatio}
           setAspectRatio={setAspectRatio}
           products={s.products}
+          // The text is the source of truth for what is named, so the warning
+          // below the box appears and clears as a name is typed or deleted.
+          mentioned={mentionedIn(prompt, named)}
           onMention={(product) =>
             setNamed((was) =>
               was.some((p) => p.name === product.name) ? was : [...was, product],
@@ -2417,6 +2422,31 @@ function BrandBar({
  * quietly discarded what was typed into it would be worse than no prompt box,
  * so it says plainly that the words are not read yet.
  */
+/**
+ * What this model will not be able to show, said before it is asked to.
+ *
+ * A named Product with no photograph attached is a Product the model invents,
+ * and the picture comes back with the right name on the wrong article. Nothing
+ * is blocked — a description is still worth having — but the person deserves to
+ * know which it is before spending a generation on it.
+ */
+function unpicturedWarning(
+  model: ImageModel,
+  mentioned: readonly Product[],
+): string | null {
+  const withPhotos = mentioned.filter(({ imageUrl }) => imageUrl).length;
+  const capacity = photographCapacity(model);
+  const missed = withPhotos - capacity;
+  if (missed <= 0) return null;
+
+  const them = missed === 1 ? "it" : "them";
+  return capacity === 0
+    ? `${model.displayName} cannot be shown a photograph — ${
+        missed === 1 ? "the named product" : `all ${missed} named products`
+      } will be described rather than pictured, so expect ${them} to be invented.`
+    : `${model.displayName} can be shown one photograph — the other ${missed} will be described rather than pictured, so expect ${them} to be invented.`;
+}
+
 function Composer({
   onGenerate,
   busy,
@@ -2430,6 +2460,7 @@ function Composer({
   aspectRatio,
   setAspectRatio,
   products,
+  mentioned,
   onMention,
 }: {
   onGenerate: () => void;
@@ -2445,6 +2476,8 @@ function Composer({
   setAspectRatio: (next: AspectRatio) => void;
   /** The catalogue an "@" searches. */
   products: readonly Product[];
+  /** The Products named in the text right now, which the chosen model may not be able to picture. */
+  mentioned: readonly Product[];
   /** Records what was named, so its photograph can travel with the request. */
   onMention: (product: Product) => void;
 }) {
@@ -2459,6 +2492,7 @@ function Composer({
   // default shape without saying they have.
   const chosen = imageModelById(model);
   const ratios = chosen ? supportedRatios(chosen) : (["1:1"] as const);
+  const unpictured = chosen ? unpicturedWarning(chosen, mentioned) : null;
 
   /** Recomputed from the caret on every change, so it closes as soon as it should. */
   const syncMention = (element: HTMLTextAreaElement) => {
@@ -2615,7 +2649,15 @@ function Composer({
             </button>
           </div>
         </div>
-        <p className="mt-1.5 text-center text-[10.5px] text-[#5c5c65]">{note}</p>
+        {unpictured ? (
+          <p className="mt-1.5 text-center text-[10.5px] text-[#d1a15a]">
+            {unpictured}
+          </p>
+        ) : (
+          <p className="mt-1.5 text-center text-[10.5px] text-[#5c5c65]">
+            {note}
+          </p>
+        )}
       </div>
     </div>
   );

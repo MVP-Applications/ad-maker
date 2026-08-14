@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   generateImage: vi.fn(),
+  falEditImage: vi.fn(),
   fetchPublicRaster: vi.fn(),
   hasGatewayConfiguration: vi.fn(() => true),
 }));
@@ -11,6 +12,7 @@ vi.mock("ai", () => ({ generateImage: mocks.generateImage }));
 vi.mock("@/lib/generate/gateway", () => ({
   gatewayImageModel: (id: string) => id,
   hasGatewayConfiguration: mocks.hasGatewayConfiguration,
+  falEditImage: mocks.falEditImage,
 }));
 
 vi.mock("@/lib/public-raster", () => ({
@@ -61,10 +63,15 @@ const product = (name: string, imageUrl: string | null) => ({
 describe("POST /api/compose", () => {
   beforeEach(() => {
     mocks.generateImage.mockReset();
+    mocks.falEditImage.mockReset();
     mocks.fetchPublicRaster.mockReset();
     mocks.hasGatewayConfiguration.mockReturnValue(true);
     mocks.generateImage.mockResolvedValue({
       image: { base64: PIXEL, mediaType: "image/png" },
+    });
+    mocks.falEditImage.mockResolvedValue({
+      bytes: Uint8Array.from([1, 2, 3]),
+      mediaType: "image/jpeg",
     });
   });
 
@@ -129,6 +136,73 @@ describe("POST /api/compose", () => {
       expect(text).toContain('"Oud Royal"');
       expect(text).toContain("no photograph supplied");
       expect(text).toContain("exactly these 2, and no others");
+    });
+
+    it("reaches a fal model through the editing path, which is its only way", async () => {
+      mocks.fetchPublicRaster.mockImplementation(async () => photo(1));
+
+      const response = await post({
+        model: "fal/fal-ai/nano-banana-pro",
+        aspectRatio: "9:16",
+        products: [product("Bella Nera", "https://cdn.example/nera.png")],
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toBe("image/jpeg");
+      // The picture goes by address, not by bytes, and the shape travels too.
+      expect(mocks.falEditImage).toHaveBeenCalledTimes(1);
+      const [request] = mocks.falEditImage.mock.calls[0];
+      expect(request.path).toBe("fal-ai/nano-banana-pro/edit");
+      expect(request.imageUrls).toEqual(["https://cdn.example/nera.png"]);
+      expect(request.aspectRatio).toBe("9:16");
+      expect(request.prompt).toContain("The attached image is the REAL");
+      expect(mocks.generateImage).not.toHaveBeenCalled();
+    });
+
+    it("sends a fal model every article named, in the order it numbers them", async () => {
+      mocks.fetchPublicRaster.mockImplementation(async () => photo(1));
+
+      await post({
+        model: "fal/fal-ai/nano-banana-pro",
+        products: [
+          product("Rose in Wonderland", "https://cdn.example/rose.png"),
+          product("Bella Nera", "https://cdn.example/nera.png"),
+        ],
+      });
+
+      const { imageUrls, prompt } = mocks.falEditImage.mock.calls[0][0];
+      expect(imageUrls).toEqual([
+        "https://cdn.example/rose.png",
+        "https://cdn.example/nera.png",
+      ]);
+      expect(prompt).toContain('Photograph 1 is "Rose in Wonderland"');
+      expect(prompt).toContain('Photograph 2 is "Bella Nera"');
+      expect(prompt).not.toContain("no photograph supplied");
+      expect(prompt).toContain("The 2 attached photographs are the REAL");
+    });
+
+    it("still describes a fal model's Product that has no photograph", async () => {
+      mocks.fetchPublicRaster.mockImplementation(async () => photo(1));
+
+      await post({
+        model: "fal/fal-ai/nano-banana-pro",
+        products: [
+          product("Rose in Wonderland", "https://cdn.example/rose.png"),
+          product("Oud Royal", null),
+        ],
+      });
+
+      const { imageUrls, prompt } = mocks.falEditImage.mock.calls[0][0];
+      expect(imageUrls).toEqual(["https://cdn.example/rose.png"]);
+      expect(prompt).toContain('Photograph 1 is "Rose in Wonderland"');
+      expect(prompt).toContain("no photograph supplied");
+    });
+
+    it("falls back to plain generation when a fal model was named nothing", async () => {
+      await post({ model: "fal/fal-ai/nano-banana-pro" });
+
+      expect(mocks.falEditImage).not.toHaveBeenCalled();
+      expect(mocks.generateImage).toHaveBeenCalledTimes(1);
     });
 
     it("describes every Product when the model cannot be shown one", async () => {

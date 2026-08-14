@@ -35,6 +35,31 @@ export function takesProductPhoto(model: ImageModel): boolean {
 }
 
 /**
+ * What the editing endpoints take: fal documents fourteen reference images and
+ * its own example passes two.
+ */
+const FAL_EDIT_MAX = 14;
+
+/**
+ * Two real photographs composed faithfully on gpt-image-1.5 — both bottles, own
+ * caps, own labels, nothing invented. Beyond five is untested here and every one
+ * costs upload size and latency, so this moves on evidence.
+ */
+const NATIVE_MAX = 5;
+
+/** How many photographs this model can be shown at once. */
+export function photographCapacity(model: ImageModel): number {
+  switch (model.reference.kind) {
+    case "none":
+      return 0;
+    case "fal_edit":
+      return FAL_EDIT_MAX;
+    case "native":
+      return NATIVE_MAX;
+  }
+}
+
+/**
  * Can this model be shown the brand's logo? Only where the image is a reference
  * for a new picture — an editing endpoint starts from what it is given, so a
  * logo sent to one returns a defaced logo rather than an advertisement.
