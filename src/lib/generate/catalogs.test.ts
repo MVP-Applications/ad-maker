@@ -18,8 +18,8 @@ import {
 } from "./models";
 
 test("direction metadata is the source of typed keys and lookup results", () => {
-  const key: CreativeDirectionKey = "typographic";
-  expect(directionByKey(key)?.label).toBe("Type Poster");
+  const key: CreativeDirectionKey = "graphic_poster";
+  expect(directionByKey(key)?.label).toBe("Graphic Poster");
   expect(directionByKey("not-a-direction")).toBeUndefined();
 });
 

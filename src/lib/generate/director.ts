@@ -19,6 +19,7 @@ import {
   FINISHES,
   LENSES,
   LIGHTING,
+  PALETTE_STRATEGIES,
   SURFACES,
   craftMenu,
 } from "./craft";
@@ -54,15 +55,21 @@ const DIRECTOR_MODEL = "openai/gpt-5.4-mini";
  * and the ones about text are the failure this whole module was written for.
  */
 const CRAFT = [
-  "ONE IDEA. An advertisement carries a single thought. Two thoughts is zero thoughts — decide which one and cut the other.",
-  "HIERARCHY. Exactly one element dominates the frame. Everything else is measurably smaller and quieter. An ad where two things compete reads as neither at thumbnail size, which is where it will actually be seen.",
-  `LESS TEXT THAN YOU WANT. Two to four strings is a finished ad; ${TEXT_BLOCK_MAX} is the hard ceiling. A headline and a wordmark is a complete advertisement. Every extra line costs the headline some of its force, so a line has to earn its place — if you cannot say what it does, drop it.`,
-  "NEVER SET FACTS AS COPY. A product description, a specification, an audience note and a price are things you KNOW; they are not things the picture says. Write copy from them. Do not transcribe them.",
-  "SAY SOMETHING TRUE. Copy must be defensible from the brand and product facts given. Do not invent a capability, a claim, a material, a guarantee or a superlative the data does not support.",
-  "SPECIFIC BEATS CLEVER. 'Eleven hours of battery' beats 'power that lasts'. Reach for the concrete noun the brand actually owns.",
-  "WRITE TO A PERSON. The audience read tells you who is looking. A phrase that lands on a procurement lead does not land on a teenager, and the same picture cannot do both.",
-  "MATCH THE SHAPE. A 9:16 is a phone held in one hand: stack the type, keep the subject high, set the headline larger. A 16:9 is a banner: put the type beside the subject, not on top of it. A 1:1 is a poster.",
-  "THE DIRECTION SERVES THE SUBJECT. Choose the Creative Direction its 'best for' line actually fits. A physical article photographed against a neon arcade grid is an article nobody can see.",
+  "THE DEFAULT FAILURE IS COMPETENCE WITHOUT INTENT: a clean object on a neutral gradient, soft light, a marble slab, one eucalyptus leaf. Technically fine, visually dead, identical to every other AI image. Your job is to not make that.",
+  "AN IMAGE CLEARS THE BAR when someone would save it without knowing what the product is. That happens when it has an IDEA — a tension, a joke, a scale trick, a material clash, a colour that should not work — not when it has good lighting.",
+  "THE IDEA TEST: name the concept in three to five words that are not 'product on a surface'. If you cannot, you do not have a concept yet. Go back and find one before you fill in anything else.",
+  "THE TRUTH TEST: the product still looks exactly like the product. Art direction is free; the object is not.",
+  "ONE IDEA. An advertisement carries a single thought. Two thoughts is zero thoughts.",
+  "HIERARCHY. Exactly one element dominates. Everything else is measurably quieter.",
+  `LESS TEXT THAN YOU WANT. Two to four strings is a finished ad; ${TEXT_BLOCK_MAX} is the ceiling. A headline and a wordmark is a complete advertisement.`,
+  "NEVER SET FACTS AS COPY. A product description, a specification, an audience note and a price are things you KNOW. Write copy from them; do not transcribe them.",
+  "NEVER DESCRIBE THE PRODUCT AS 'beautiful', 'premium', 'luxurious' or 'high quality'. Those are outcomes, not instructions. Describe the material and let the light do the work.",
+  "NO ADJECTIVE STACKING. 'Stunning, gorgeous, ultra-detailed, 8k, masterpiece' is not art direction. A named lens, a named light and a named surface is.",
+  "SAY SOMETHING TRUE. Copy must be defensible from the brand and product facts given. Invent no capability, claim, material or guarantee the data does not support.",
+  "SPECIFIC BEATS CLEVER. 'Eleven hours of battery' beats 'power that lasts'.",
+  "WRITE TO A PERSON. The audience read tells you who is looking. A phrase that lands on a procurement lead does not land on a teenager.",
+  "MATCH THE SHAPE. A 9:16 is a phone in one hand: stack the type, keep the subject high. A 16:9 is a banner: type beside the subject. A 1:1 is a poster.",
+  "THE FAMILY SERVES THE SUBJECT. Choose the family whose 'reads' line is the effect this brief actually wants.",
 ] as const;
 
 /**
@@ -70,11 +77,11 @@ const CRAFT = [
  * when it does not.
  */
 const PRICE_DOCTRINE = [
-  "PRICE IS A DECISION, AND THE DEFAULT IS NO.",
-  "A price belongs in an image only when the image is a commercial offer: a promotion, a discount, a sale with a date on it — or when the request explicitly asks to show one. That is the whole list.",
-  "A hero shot, a brand ad, a launch, a lifestyle image and a testimonial carry no price. A beautiful product photograph with a number stamped across it stops being an advertisement and becomes a shelf label.",
-  "A price also dates the image the day the shop changes it, and an image outlives a price list.",
-  "You will still be told every price. That is so you know what tier of thing you are lighting — a forty-dollar tote and a four-thousand-dollar one are not photographed the same way. It is not permission to print it.",
+  "PRICE IS A GRAMMAR SETTING, NOT A CAPTION.",
+  "What the thing costs tells you how to shoot it. Budget: energetic, saturated, graphic, playful — colour does the selling. Mid: warm, tactile, human, editorial — material does the selling. Luxury: restraint, negative space, one perfect light, expensive materials, silence — what you leave out does the selling.",
+  "That is what the number is for. Printing it is a separate decision, and the default is no.",
+  "A price belongs on the canvas only when the image IS a commercial offer — a promotion, a discount, a sale with a date — or when the request explicitly asks to show one. That is the whole list.",
+  "A hero shot, a brand image, a launch, a lifestyle picture and a testimonial carry no price. A beautiful photograph with a number stamped across it stops being an advertisement and becomes a shelf label. It also dates the image the day the shop changes the number, and an image outlives a price list.",
 ] as const;
 
 /** What the director may be shown about one catalogue entry. */
@@ -143,9 +150,9 @@ function buildPrompt(context: ArtContext): string {
       "\n",
     ),
     [
-      "CREATIVE DIRECTIONS — what the picture is OF. Each is a set of rules to write to, not text to copy:",
+      "CONCEPT FAMILIES — what the picture MEANS. Pick the one whose `reads` is the effect this brief wants. Each is a set of rules to write to, never text to copy:",
       ...CREATIVE_DIRECTIONS.flatMap((c) => [
-        `- ${c.key} (${c.label}) — best for: ${c.bestFor}`,
+        `- ${c.key} (${c.label}) — reads: ${c.reads}. Best for: ${c.bestFor}`,
         ...c.rules.map((rule) => `    · ${rule}`),
       ]),
     ].join("\n"),
@@ -161,6 +168,7 @@ function buildPrompt(context: ArtContext): string {
       `COMPOSITION: ${craftMenu(COMPOSITIONS)}`,
       `SURFACE: ${craftMenu(SURFACES)}`,
       `FINISH: ${craftMenu(FINISHES)}`,
+      `PALETTE STRATEGY — how the colours relate, not which they are: ${craftMenu(PALETTE_STRATEGIES)}`,
       `COPY ANGLE — this one shapes your headline and never the picture: ${craftMenu(COPY_ANGLES)}`,
     ].join("\n"),
   ]
@@ -223,9 +231,16 @@ function buildSystem(context: ArtContext, seen: readonly SeenArticle[]): string 
       "For a `price` block write nothing you invented: the real listed price is substituted from the catalogue, and a price block is dropped entirely unless the rules above allow one.",
     ].join("\n"),
     [
-      "THE SCENE is the picture itself, in 2-4 sentences: what is in frame, and what it is doing. Describe what IS there — an image model renders what it is told to picture, so 'empty studio, one object' works where 'no clutter' does not. Name at most three things in frame. Never put text, words, letters, numbers or logos in the scene; they are composed separately from your text list.",
-      "THE CRAFT AXES carry the light, the lens, the arrangement, the ground and the grade, so the scene does not have to. Do not spend the scene restating a choice an axis has already made.",
-      "Reach past the obvious combination. A studio hero lit by a wrapped softbox on seamless paper is correct and forgettable; the same article on wet black marble under one hard split light is the same information and a better advertisement. The axes are independent for exactly this reason.",
+      "THE PICTURE IS BUILT FROM SLOTS, and each one is a different question. Answer them separately — a single blob of scene description is how the verb gets skipped.",
+      "`conceptName` — the idea in 3-5 words. Write this FIRST. If it comes out as 'product on a surface', you have no idea yet.",
+      "`state` — what the product is DOING. Mid-pour, half-unwrapped, still settling, caught falling, resting after use. 'Existing on a surface' is the default an image model reaches for and the only cure is to be handed the verb.",
+      "`set` — the surface, backdrop, environment or architecture.",
+      "`supportingCast` — what shares the frame: props, ingredients, hands, fabric, debris. Leave it empty where the picture wants nothing else; an empty frame is a decision.",
+      "`moodReference` — an era, a medium, an editorial register. '1970s Italian magazine spread' is a reference. 'Beautiful and premium' is not.",
+      "`prominence` — how much of the frame the article owns. One picture in a set may carry a FEELING rather than information: a hand pausing mid-reach, steam on a cold window, an empty chair and a half-used jar. Use `implied` for those. The product may be small, cropped or out of focus — where any of it shows, it is still exactly the real article.",
+      "Name at most three things in frame. Never put text, words, letters, numbers or logos in any of these slots; they are composed separately from your text list.",
+      "THE CRAFT AXES carry the light, the lens, the arrangement, the ground, the colour relationship and the grade, so the slots do not have to. Do not spend `set` restating a surface an axis already chose.",
+      "Reach past the obvious combination. A hero lit by a wrapped softbox on seamless paper is correct and forgettable; the same article on wet black marble under one hard split light is the same information and a better advertisement. The axes are independent for exactly this reason.",
     ].join("\n"),
     context.language
       ? `WRITE THE COPY IN THE SHOP'S OWN LANGUAGE (${context.language}), in that script, unless the request itself is written in another language — then follow the request.`

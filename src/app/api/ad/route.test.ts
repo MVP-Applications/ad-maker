@@ -28,7 +28,7 @@ const brief: AdBrief = {
 };
 
 const concept: PlannedConcept = {
-  key: "typographic",
+  key: "graphic_poster",
   model: "openai/gpt-image-2",
   subject: { kind: "company" },
   headline: "Move money",
@@ -39,7 +39,7 @@ const concept: PlannedConcept = {
 };
 
 const productConcept: PlannedConcept = {
-  key: "product_hero",
+  key: "sculptural_hero",
   model: "fal/fal-ai/imagen4/preview/ultra",
   subject: {
     kind: "product",

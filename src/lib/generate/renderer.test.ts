@@ -17,7 +17,7 @@ const LOGO = {
 
 const query = (overrides: Partial<RenderedAdQuery> = {}): RenderedAdQuery => ({
   domain: "stripe.com",
-  concept: "typographic",
+  concept: "graphic_poster",
   model: "openai/gpt-image-2",
   subject: { kind: "company" },
   headline: "Move money",
@@ -64,7 +64,7 @@ describe("Ad Renderer", () => {
       value: {
         bytes: OUTPUT,
         mediaType: "image/png",
-        concept: "typographic",
+        concept: "graphic_poster",
         model: "openai/gpt-image-2",
       },
     });

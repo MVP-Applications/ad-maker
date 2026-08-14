@@ -44,19 +44,26 @@ const directs = (plan: Partial<RawArtPlan>) =>
     enforceArtPlan(
       {
         adType: "product_hero",
-        direction: "product_hero",
+        direction: "sculptural_hero",
         lighting: null,
         lens: null,
         composition: null,
         surface: null,
         finish: null,
         copyAngle: null,
+        paletteStrategy: null,
+        conceptName: "",
+        idea: "",
+        prominence: "hero",
+        state: "",
+        set: "",
+        supportingCast: "",
+        moodReference: "",
         rationale: "",
         audienceNote: "",
         heroProducts: [],
         supportingProducts: [],
         articles: [],
-        scene: "",
         buyerAskedForPeople: false,
         buyerAskedForPrice: false,
         palette: {
@@ -300,11 +307,11 @@ describe("POST /api/compose", () => {
       const { text } = asked();
       // The brand colours are still stated — they are just no longer the last
       // word on what colour the keyboard is.
-      expect(text).toContain("Palette: vivid teal as the dominant field");
+      expect(text).toContain("Colour anchors: vivid teal as the dominant field");
       expect(text).toContain("COLOUR OVERRIDE");
       expect(text).toContain("keeps its own real colours");
       expect(text.indexOf("COLOUR OVERRIDE")).toBeGreaterThan(
-        text.indexOf("Palette: vivid teal"),
+        text.indexOf("Colour anchors: vivid teal"),
       );
       expect(text.trimEnd().endsWith("redrawing the product is not.")).toBe(
         true,
@@ -547,7 +554,7 @@ describe("POST /api/compose", () => {
     it("tells the director what this session already made", async () => {
       await post({
         avoid: [
-          { direction: "product_hero", lighting: "rembrandt", surface: "seamless_paper" },
+          { direction: "sculptural_hero", lighting: "rembrandt", surface: "seamless_paper" },
           { direction: "not a real one that survives", finish: "portra_warm" },
         ],
       });
@@ -555,7 +562,7 @@ describe("POST /api/compose", () => {
       const [context] = mocks.directArtwork.mock.calls[0];
       expect(context.avoid).toEqual([
         {
-          direction: "product_hero",
+          direction: "sculptural_hero",
           lighting: "rembrandt",
           surface: "seamless_paper",
           finish: null,
@@ -570,7 +577,7 @@ describe("POST /api/compose", () => {
     });
 
     it("hands the craft back so the next image can differ from this one", async () => {
-      directs({ direction: "levitation", lighting: "split_light", finish: "halation_bloom" });
+      directs({ direction: "kinetic", lighting: "split_light", finish: "halation_bloom" });
 
       const response = await post({});
       expect(decodeURIComponent(response.headers.get("X-Ad-Craft") ?? "")).toBe(
@@ -582,13 +589,13 @@ describe("POST /api/compose", () => {
     it("hands its reasoning back beside the picture", async () => {
       directs({
         adType: "promo_offer",
-        direction: "typographic",
+        direction: "graphic_poster",
         rationale: "الطلب يسأل عن عرض",
       });
 
       const response = await post({});
       expect(response.headers.get("X-Ad-Type")).toBe("promo_offer");
-      expect(response.headers.get("X-Ad-Direction")).toBe("typographic");
+      expect(response.headers.get("X-Ad-Direction")).toBe("graphic_poster");
       expect(
         decodeURIComponent(response.headers.get("X-Ad-Rationale") ?? ""),
       ).toBe("الطلب يسأل عن عرض");

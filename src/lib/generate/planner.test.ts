@@ -58,7 +58,7 @@ const subjectOf = (product: Product) => ({
 
 const CONCEPTS: readonly PlannedConcept[] = [
   {
-    key: "product_hero",
+    key: "sculptural_hero",
     model: "openai/gpt-image-1.5",
     subject: { kind: "company" },
     headline: "Move Faster",
@@ -68,7 +68,7 @@ const CONCEPTS: readonly PlannedConcept[] = [
     scene: "",
   },
   {
-    key: "isometric",
+    key: "interior_vignette",
     model: "fal/xai/grok-imagine-image",
     subject: { kind: "company" },
     headline: "Build Boldly",
@@ -78,7 +78,7 @@ const CONCEPTS: readonly PlannedConcept[] = [
     scene: "",
   },
   {
-    key: "typographic",
+    key: "graphic_poster",
     model: "fal/fal-ai/imagen4/preview/ultra",
     subject: { kind: "company" },
     headline: "Own Tomorrow",
@@ -88,7 +88,7 @@ const CONCEPTS: readonly PlannedConcept[] = [
     scene: "",
   },
   {
-    key: "macro_material",
+    key: "macro_texture",
     model: "openai/gpt-image-2",
     subject: subjectOf(PRODUCTS[0]),
     headline: "Share. Sell. Done.",
@@ -98,7 +98,7 @@ const CONCEPTS: readonly PlannedConcept[] = [
     scene: "",
   },
   {
-    key: "gradient_field",
+    key: "surreal_conceptual",
     model: "fal/fal-ai/nano-banana-pro",
     subject: subjectOf(PRODUCTS[1]),
     headline: "Billing That Grows",
@@ -108,7 +108,7 @@ const CONCEPTS: readonly PlannedConcept[] = [
     scene: "",
   },
   {
-    key: "editorial_spread",
+    key: "editorial_still_life",
     model: "fal/fal-ai/bytedance/seedream/v4.5/text-to-image",
     subject: subjectOf(PRODUCTS[2]),
     headline: "Checkout, Simplified",

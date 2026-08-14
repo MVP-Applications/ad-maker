@@ -54,19 +54,26 @@ const block = (extra: Partial<RawArtPlan["blocks"][number]> = {}) => ({
 
 const plan = (extra: Partial<RawArtPlan> = {}): RawArtPlan => ({
   adType: "product_hero",
-  direction: "product_hero",
+  direction: "sculptural_hero",
   lighting: "rembrandt",
   lens: "portrait_85",
   composition: "thirds_right",
   surface: "wet_black_marble",
   finish: "portra_warm",
   copyAngle: "understatement",
+  paletteStrategy: "article_led",
+  conceptName: "Bottle mid-pour",
+  idea: "The pour is frozen where nobody expects it.",
+  prominence: "hero",
+  state: "caught mid-pour, the liquid still in the air",
+  set: "a cracked slab of desert clay",
+  supportingCast: "",
+  moodReference: "1970s Italian magazine spread",
   rationale: "A physical article deserves a hero shot.",
   audienceNote: "Gift buyers.",
   heroProducts: [],
   supportingProducts: [],
   articles: [],
-  scene: "One bottle on a seamless backdrop, lit from the left.",
   buyerAskedForPeople: false,
   buyerAskedForPrice: false,
   palette: { background: "deep navy", ink: "warm gold", accent: "warm gold" },
@@ -313,18 +320,18 @@ describe("the direction", () => {
    */
   it("moves a photographed article onto a direction that can show it", () => {
     const enforced = enforceArtPlan(
-      plan({ direction: "retro_arcade" }),
+      plan({ direction: "surreal_conceptual" }),
       context({
         named: [product("WH80", { imageUrl: "https://cdn.example/wh80.png" })],
       }),
     );
 
-    expect(enforced.direction).toBe("product_hero");
+    expect(enforced.direction).toBe("sculptural_hero");
   });
 
   it("spreads several photographed articles rather than heroing one", () => {
     const enforced = enforceArtPlan(
-      plan({ direction: "blueprint" }),
+      plan({ direction: "graphic_poster" }),
       context({
         named: [
           product("WH80", { imageUrl: "https://cdn.example/wh80.png" }),
@@ -333,7 +340,7 @@ describe("the direction", () => {
       }),
     );
 
-    expect(enforced.direction).toBe("editorial_spread");
+    expect(enforced.direction).toBe("flat_lay_knolling");
   });
 
   /**
@@ -352,13 +359,13 @@ describe("the direction", () => {
     expect(enforced.heroProducts).toHaveLength(3);
   });
 
-  it("leaves an abstract direction alone when no photograph travels", () => {
+  it("leaves an abstract family alone when no photograph travels", () => {
     const enforced = enforceArtPlan(
-      plan({ direction: "retro_arcade" }),
+      plan({ direction: "surreal_conceptual" }),
       context({ named: [product("WH80")] }),
     );
 
-    expect(enforced.direction).toBe("retro_arcade");
+    expect(enforced.direction).toBe("surreal_conceptual");
   });
 
   it("keeps people out unless the request asked for them", () => {
@@ -440,7 +447,8 @@ describe("the prompt", () => {
 
     expect(text).toContain("One hard key light 45 degrees off-axis");
     expect(text).not.toContain("85mm");
-    expect(text).not.toContain("marble");
+    expect(text).not.toContain("Polished black marble");
+    expect(text).not.toContain("warm colour negative film");
   });
 
   /** The copy angle argued the headline into existence; it is not a picture. */
@@ -491,7 +499,9 @@ describe("when the director never answered", () => {
 
     expect(fallback.heroProducts).toEqual(["Bella Nera", "Oud Royal"]);
     expect(fallback.adType).toBe("multi_product");
-    expect(fallback.scene).toBe("");
+    // No idea, no state, no set: nothing was directed, so nothing is claimed.
+    expect(fallback.conceptName).toBe("");
+    expect(fallback.state).toBe("");
     expect(roles(fallback.blocks)).toEqual(["brand"]);
   });
 
@@ -502,6 +512,6 @@ describe("when the director never answered", () => {
       }),
     );
 
-    expect(fallback.direction).toBe("product_hero");
+    expect(fallback.direction).toBe("sculptural_hero");
   });
 });

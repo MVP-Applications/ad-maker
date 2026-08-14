@@ -127,7 +127,7 @@ describe("Brief concept planning", () => {
     it("drops a written picture from any slot whose direction it moved", async () => {
       mocks.generateObject.mockResolvedValue({
         object: {
-          companyPicks: ["monochrome_crop", "blueprint", "retro_arcade"].map(
+          companyPicks: ["macro_texture", "flat_lay_knolling", "kinetic"].map(
             (concept) => ({
               concept,
               headline: "One two three",
@@ -136,7 +136,7 @@ describe("Brief concept planning", () => {
               scene: `A picture written for ${concept}.`,
             }),
           ),
-          productPicks: ["data_viz", "collage"].map((concept) => ({
+          productPicks: ["elemental_material", "set_design_maximalism"].map((concept) => ({
             concept,
             headline: "One two three",
             subheadline: "A supporting line for this concept",
@@ -222,30 +222,30 @@ describe("Brief concept planning", () => {
       object: {
         companyPicks: [
           {
-            concept: "typographic",
+            concept: "graphic_poster",
             headline: "One two three four five",
             subheadline:
               "one two three four five six seven eight nine ten eleven twelve thirteen",
           },
           {
-            concept: "typographic",
+            concept: "graphic_poster",
             headline: "Duplicate",
             subheadline: "This duplicate direction must be discarded",
           },
           {
-            concept: "isometric",
+            concept: "interior_vignette",
             headline: "Built to grow",
             subheadline: "Financial infrastructure for ambitious teams",
           },
         ],
         productPicks: [
           {
-            concept: "isometric",
+            concept: "interior_vignette",
             headline: "Duplicate product direction",
             subheadline: "This conflicts with a company direction",
           },
           {
-            concept: "macro_material",
+            concept: "macro_texture",
             headline: "Automate every recurring invoice today",
             subheadline:
               "one two three four five six seven eight nine ten eleven twelve thirteen",
@@ -265,10 +265,10 @@ describe("Brief concept planning", () => {
       products.map((product) => ({ kind: "product", ...advertised(product) })),
     );
 
-    const generatedCompany = concepts.find(({ key }) => key === "typographic");
+    const generatedCompany = concepts.find(({ key }) => key === "graphic_poster");
     expect(generatedCompany?.headline).toBe("One two three");
     expect(generatedCompany?.subheadline.split(/\s+/)).toHaveLength(12);
-    expect(concepts.filter(({ key }) => key === "typographic")).toHaveLength(1);
+    expect(concepts.filter(({ key }) => key === "graphic_poster")).toHaveLength(1);
 
     const fallbackProduct = concepts[3];
     expect(fallbackProduct.subject).toEqual({
@@ -279,7 +279,7 @@ describe("Brief concept planning", () => {
 
     const generatedProduct = concepts[4];
     expect(generatedProduct).toMatchObject({
-      key: "macro_material",
+      key: "macro_texture",
       subject: { kind: "product", ...advertised(products[1]) },
       headline: "Automate every recurring",
     });

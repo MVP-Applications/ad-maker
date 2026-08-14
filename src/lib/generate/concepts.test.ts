@@ -86,16 +86,16 @@ describe("the written picture", () => {
     "A single amber bottle on wet slate, low mist, one cool key light from the left.";
 
   test("replaces the direction's own paragraph when the planner wrote one", () => {
-    const prompt = buildConceptPrompt("product_hero", input({ scene: WRITTEN }));
+    const prompt = buildConceptPrompt("sculptural_hero", input({ scene: WRITTEN }));
 
     expect(prompt).toContain(WRITTEN);
-    expect(prompt).not.toContain("seamless studio backdrop");
+    expect(prompt).not.toContain("plinths, floating suspension, mirrored bases or geometric risers");
   });
 
   test("falls back to the direction's paragraph when it did not", () => {
-    const prompt = buildConceptPrompt("product_hero", input({ scene: "" }));
+    const prompt = buildConceptPrompt("sculptural_hero", input({ scene: "" }));
 
-    expect(prompt).toContain("seamless studio backdrop");
+    expect(prompt).toContain("plinths, floating suspension, mirrored bases or geometric risers");
   });
 
   // Whichever way the picture arrived, the deterministic blocks stay: what may
@@ -114,7 +114,7 @@ describe("the written picture", () => {
   );
 
   test("still carries the brand and campaign focus", () => {
-    const prompt = buildConceptPrompt("collage", input({ scene: WRITTEN }));
+    const prompt = buildConceptPrompt("set_design_maximalism", input({ scene: WRITTEN }));
 
     expect(prompt).toContain("The brand: Stripe (stripe.com)");
     expect(prompt).toContain("CAMPAIGN FOCUS");
@@ -122,7 +122,7 @@ describe("the written picture", () => {
 
   test("still lifts the ban on people where the planner allowed it", () => {
     const prompt = buildConceptPrompt(
-      "editorial_spread",
+      "editorial_still_life",
       input({ scene: WRITTEN, showsPeople: true }),
     );
 
@@ -133,12 +133,12 @@ describe("the written picture", () => {
 
 describe("the ban on people", () => {
   test("holds by default", () => {
-    expect(buildConceptPrompt("product_hero", input())).toContain(NO_PEOPLE);
+    expect(buildConceptPrompt("sculptural_hero", input())).toContain(NO_PEOPLE);
   });
 
   test("lifts where the planner read the request as asking for a person", () => {
     const prompt = buildConceptPrompt(
-      "editorial_spread",
+      "editorial_still_life",
       input({ showsPeople: true }),
     );
 

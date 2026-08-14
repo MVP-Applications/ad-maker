@@ -74,18 +74,25 @@ describe("the art director", () => {
     mocks.generateObject.mockResolvedValue({
       object: {
         adType: "product_hero",
-        direction: "product_hero",
+        direction: "sculptural_hero",
         lighting: "split_light",
         lens: "portrait_85",
         composition: "thirds_right",
         surface: "wet_black_marble",
         finish: "portra_warm",
         copyAngle: "understatement",
+        paletteStrategy: "article_led",
+        conceptName: "Bottle mid-pour",
+        idea: "The pour is frozen where nobody expects it.",
+        prominence: "hero",
+        state: "caught mid-pour",
+        set: "a cracked slab of desert clay",
+        supportingCast: "",
+        moodReference: "1970s Italian magazine spread",
         rationale: "A physical article deserves a hero shot.",
         audienceNote: "Gift buyers.",
         heroProducts: ["Oud Royal"],
         supportingProducts: [],
-        scene: "One bottle on a seamless backdrop.",
         buyerAskedForPeople: false,
         buyerAskedForPrice: false,
         palette: { background: "deep navy", ink: "warm gold", accent: "warm gold" },
@@ -118,7 +125,7 @@ describe("the art director", () => {
     await directArtwork(context(), []);
 
     const { system } = answered();
-    expect(system).toContain("PRICE IS A DECISION, AND THE DEFAULT IS NO.");
+    expect(system).toContain("PRICE IS A GRAMMAR SETTING, NOT A CAPTION.");
     expect(system).toContain("ONE IDEA.");
     expect(system).toContain("NEVER SET FACTS AS COPY.");
     // The shop's own language, so an Arabic house is not advertised in English.
@@ -141,8 +148,8 @@ describe("the art director", () => {
     expect(prompt).toContain('- "Oud Royal"');
     expect(prompt).toContain("[no price on file]");
     // Every direction it may choose, with the rules that bound each one.
-    expect(prompt).toContain("product_hero (Product Hero) — best for:");
-    expect(prompt).toContain("retro_arcade (Retro Arcade) — best for:");
+    expect(prompt).toContain("sculptural_hero (Sculptural Hero) — reads:");
+    expect(prompt).toContain("elemental_material (Elemental / Material) — reads:");
   });
 
   /**
@@ -172,6 +179,7 @@ describe("the art director", () => {
       composition: "thirds_right",
       surface: "wet_black_marble",
       finish: "portra_warm",
+      palette: "article_led",
       copyAngle: "understatement",
     });
   });
@@ -219,13 +227,21 @@ describe("the art director", () => {
         object: {
           ...mocks.generateObject.mock.results,
           adType: "product_hero",
-          direction: "product_hero",
+          direction: "sculptural_hero",
           lighting: null,
           lens: null,
           composition: null,
           surface: null,
           finish: null,
           copyAngle: null,
+          paletteStrategy: null,
+          conceptName: "",
+          idea: "",
+          prominence: "hero",
+          state: "",
+          set: "",
+          supportingCast: "",
+          moodReference: "",
           rationale: "",
           audienceNote: "",
           heroProducts: ["Oud Royal"],
@@ -236,7 +252,6 @@ describe("the art director", () => {
               appearance: "amber glass with a brushed gold cap and a cream label",
             },
           ],
-          scene: "",
           buyerAskedForPeople: false,
           buyerAskedForPrice: false,
           palette: { background: "slate", ink: "cream", accent: "gold" },
@@ -271,7 +286,7 @@ describe("the art director", () => {
         context({
           avoid: [
             {
-              direction: "product_hero",
+              direction: "sculptural_hero",
               lighting: "rembrandt",
               surface: "seamless_paper",
               finish: null,
@@ -284,7 +299,7 @@ describe("the art director", () => {
       const { system } = answered();
       expect(system).toContain("ALREADY MADE IN THIS SESSION");
       expect(system).toContain(
-        "1. direction product_hero, lighting rembrandt, surface seamless_paper",
+        "1. direction sculptural_hero, lighting rembrandt, surface seamless_paper",
       );
       expect(system).toContain("differ from every one below on the direction");
     });

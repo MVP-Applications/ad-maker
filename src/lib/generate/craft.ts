@@ -1,26 +1,25 @@
 /**
  * The craft library: the moves an art director actually chooses between.
  *
- * Twelve Creative Directions were never twelve looks — they were twelve
- * bundles, each one welding a subject treatment to a lighting setup to a
- * palette to a camera position. Two Product Hero ads came back as the same
- * photograph because the direction had already decided everything except the
- * product in it.
+ * The Creative Directions were never a set of looks — they were bundles, each
+ * one welding a subject treatment to a lighting setup to a palette to a camera
+ * position. Two hero ads came back as the same photograph because the direction
+ * had already decided everything except the product standing in it.
  *
- * So the bundles come apart. A direction now says what the picture is OF, and
+ * So the bundles come apart. A concept family says what the picture MEANS, and
  * these axes say how it is made: how it is lit, what it is shot on, how it is
- * arranged, what it sits on, how it is graded, and what the copy is arguing.
- * They are orthogonal on purpose — any lighting works with any lens works with
- * any surface — so the director composes rather than picks from a menu of
- * finished pictures.
+ * arranged, what it sits on, how the colours relate, how it is graded, and what
+ * the copy is arguing. They are orthogonal on purpose — any lighting works with
+ * any lens works with any surface — so the director composes rather than picks
+ * from a menu of finished pictures.
  *
- * Roughly a hundred and seventy named moves live here and in `directions.ts`.
- * Composed, they are not a hundred and seventy looks: a direction, a light, a
- * lens, a composition, a surface and a grade is a space in the tens of millions,
- * and every point in it is coherent because each axis was written to stand
- * alone. That is the argument for building it this way rather than writing three
- * hundred flat presets — three hundred presets is three hundred looks, and the
- * three hundred and first is a code change.
+ * About a hundred and fifty named moves live here and in `directions.ts`.
+ * Composed, they are not a hundred and fifty looks: a family, a light, a lens, a
+ * composition, a surface, a colour relationship and a grade is a space in the
+ * tens of millions, and every point in it is coherent because each axis was
+ * written to stand alone. That is the argument for building it this way rather
+ * than writing three hundred flat presets — three hundred presets is three
+ * hundred looks, and the three hundred and first is a code change.
  *
  * Each entry carries the sentence that goes into the image prompt. The director
  * chooses by key alone, so its own prompt stays short; the prose is spliced in
@@ -717,6 +716,76 @@ export const FINISHES = [
 
 export type FinishKey = (typeof FINISHES)[number]["key"];
 
+/* ─────────────────────────── palette ─────────────────────────── */
+
+/**
+ * How the colours relate, rather than which colours they are.
+ *
+ * The brand supplies two hues and the article supplies its own; this axis is
+ * the decision about what to do with them. It exists because "brand teal and
+ * brand gold" is not a palette, it is an inventory — and an image model handed
+ * an inventory distributes it evenly, which is how a product ends up painted in
+ * the brand's colours.
+ */
+export const PALETTE_STRATEGIES = [
+  {
+    key: "mono_accent",
+    label: "Monochrome plus one accent",
+    prompt:
+      "One hue across the entire frame — highlights, midtones and shadows all within it — broken by a single accent colour used once.",
+  },
+  {
+    key: "analogous_warm",
+    label: "Analogous warm bath",
+    prompt:
+      "Neighbouring warm hues bleeding into one another, no cool note anywhere in frame.",
+  },
+  {
+    key: "analogous_cool",
+    label: "Analogous cool bath",
+    prompt:
+      "Neighbouring cool hues throughout, the warmth reserved for one small highlight or nothing at all.",
+  },
+  {
+    key: "complementary_clash",
+    label: "Complementary clash",
+    prompt:
+      "Two opposite hues at full strength, set directly against each other with no transition between them.",
+  },
+  {
+    key: "muted_earth_metal",
+    label: "Muted earth with metal",
+    prompt:
+      "Desaturated earth tones throughout, lifted by one metallic — brass, steel or oxidised gold.",
+  },
+  {
+    key: "high_key_black_anchor",
+    label: "High key with a black anchor",
+    prompt:
+      "Pale, bright, low-contrast colour across the frame, anchored by one area of true black.",
+  },
+  {
+    key: "duotone_gel",
+    label: "Duotone gel",
+    prompt:
+      "Two gelled colours doing all the lighting, so every surface reads as one of the two or the seam between them.",
+  },
+  {
+    key: "brand_plus_dirty_neutral",
+    label: "Brand colour and its dirty neutral",
+    prompt:
+      "One brand colour used sparingly against a desaturated, slightly dirty neutral that makes it look expensive.",
+  },
+  {
+    key: "article_led",
+    label: "Led by the article",
+    prompt:
+      "The palette built outward from the article's own real colours, with the surrounding field chosen to make those colours sing rather than to match them.",
+  },
+] as const satisfies readonly CraftMove<string>[];
+
+export type PaletteStrategyKey = (typeof PALETTE_STRATEGIES)[number]["key"];
+
 /* ─────────────────────────── argument ─────────────────────────── */
 
 /**
@@ -884,6 +953,7 @@ const INDEXES = {
   composition: index(COMPOSITIONS),
   surface: index(SURFACES),
   finish: index(FINISHES),
+  palette: index(PALETTE_STRATEGIES),
   copyAngle: index(COPY_ANGLES),
 } as const;
 
@@ -906,6 +976,7 @@ export const LENS_KEYS = keysOf(LENSES);
 export const COMPOSITION_KEYS = keysOf(COMPOSITIONS);
 export const SURFACE_KEYS = keysOf(SURFACES);
 export const FINISH_KEYS = keysOf(FINISHES);
+export const PALETTE_STRATEGY_KEYS = keysOf(PALETTE_STRATEGIES);
 export const COPY_ANGLE_KEYS = keysOf(COPY_ANGLES);
 
 /**

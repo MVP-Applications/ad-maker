@@ -6,6 +6,7 @@ import {
   FINISH_KEYS,
   LENS_KEYS,
   LIGHTING_KEYS,
+  PALETTE_STRATEGY_KEYS,
   SURFACE_KEYS,
   craftMove,
 } from "./craft";
@@ -84,14 +85,14 @@ const PRICE_LED_AD_TYPES = new Set<AdType>(["promo_offer", "seasonal"]);
 
 /** The direction to fall back to when the intent is known and the style is not. */
 const DIRECTION_FOR_AD_TYPE: Record<AdType, CreativeDirectionKey> = {
-  product_hero: "product_hero",
-  multi_product: "editorial_spread",
-  promo_offer: "typographic",
-  brand_awareness: "gradient_field",
-  product_launch: "product_hero",
-  lifestyle: "editorial_spread",
-  seasonal: "editorial_spread",
-  testimonial: "typographic",
+  product_hero: "sculptural_hero",
+  multi_product: "flat_lay_knolling",
+  promo_offer: "graphic_poster",
+  brand_awareness: "graphic_poster",
+  product_launch: "sculptural_hero",
+  lifestyle: "human_moment",
+  seasonal: "seasonal_narrative",
+  testimonial: "human_moment",
 };
 
 /**
@@ -328,8 +329,8 @@ export type PriorChoice = {
 
 /**
  * The craft the director chose, by key. Null on any axis it left to the scene —
- * a Type Poster needs no lens, and a director that names one anyway has decided
- * something the picture did not ask it to decide.
+ * a graphic poster needs no lens, and a director that names one anyway has
+ * decided something the picture did not ask it to decide.
  */
 export type CraftChoice = {
   lighting: string | null;
@@ -337,6 +338,8 @@ export type CraftChoice = {
   composition: string | null;
   surface: string | null;
   finish: string | null;
+  /** How the colours relate, rather than which they are. */
+  palette: string | null;
   /** Never reaches the image. It shaped the headline before the picture existed. */
   copyAngle: string | null;
 };
@@ -363,11 +366,73 @@ export type ArticleRead = {
   appearance: string;
 };
 
+/**
+ * How much of the picture the article owns.
+ *
+ * `implied` exists because the skill insists on it: one shot in a set can carry
+ * a feeling rather than information — a hand pausing mid-reach, steam on a cold
+ * window, an empty chair and a half-used jar. The product may be small, cropped
+ * or present only by its effect. What it may never be is a different product,
+ * which is why fidelity still applies at every level here.
+ */
+export const PROMINENCES = ["hero", "present", "implied"] as const;
+export type Prominence = (typeof PROMINENCES)[number];
+
+const PROMINENCE_PROSE: Record<Prominence, string> = {
+  hero: "The article owns the frame: large, sharp, unmistakably the subject.",
+  present:
+    "The article is clearly in frame and clearly readable, but the scene around it is doing equal work.",
+  implied:
+    "The article is small, partially cropped, or softly out of focus — this picture carries a feeling rather than information. Where any part of it is visible it is still exactly the real article, never a stand-in.",
+};
+
+/**
+ * What the price is FOR, which is almost never the canvas.
+ *
+ * Straight from the skill: price is a grammar setting. It tells you whether to
+ * shoot restraint or energy. A forty-dirham thing and a four-thousand-dirham
+ * thing are not lit the same way, framed the same way, or written about in the
+ * same register — and that is the whole of what the number is doing in the
+ * brief. Printing it is a separate decision, gated separately.
+ */
+export const PRICE_TIERS = ["budget", "mid", "luxury"] as const;
+export type PriceTier = (typeof PRICE_TIERS)[number];
+
+const TIER_GRAMMAR: Record<PriceTier, string> = {
+  budget:
+    "Visual grammar: energetic, saturated, graphic, playful. Colour does the selling.",
+  mid: "Visual grammar: warm, tactile, human, editorial. Material and texture do the selling.",
+  luxury:
+    "Visual grammar: restraint, negative space, one perfect light, expensive materials, silence. What is left out does the selling.",
+};
+
 export type ArtPlan = {
   adType: AdType;
   direction: CreativeDirectionKey;
   craft: CraftChoice;
   articles: ArticleRead[];
+  /**
+   * The idea, named in five words. The skill's first test: if the concept
+   * cannot be named without saying "product on a surface", there is no concept
+   * and the picture will come back competent and dead.
+   */
+  conceptName: string;
+  /** One sentence on why this stops the scroll. Shown, logged, never rendered. */
+  idea: string;
+  /**
+   * What the product is DOING, rather than what it is. Its own slot because
+   * "existing on a surface" is the default an image model reaches for, and the
+   * only cure is to be told the verb.
+   */
+  state: string;
+  /** Surface, backdrop, environment, architecture. */
+  set: string;
+  /** Props, ingredients, hands, fabric, debris — what shares the frame. */
+  supportingCast: string;
+  /** Era, medium, editorial register. The reference, not an adjective. */
+  moodReference: string;
+  /** How much of the frame the article actually owns. */
+  prominence: Prominence;
   /** Why this direction, in the director's words. Shown, logged, never rendered. */
   rationale: string;
   /** Who this ad is talking to, as the director read it. Never rendered. */
@@ -375,7 +440,6 @@ export type ArtPlan = {
   /** Catalogue names, resolved. Empty means a company-level ad. */
   heroProducts: string[];
   supportingProducts: string[];
-  scene: string;
   showsPeople: boolean;
   palette: { background: string; ink: string; accent: string };
   typeface: string;
@@ -406,7 +470,7 @@ export const artPlanSchema = z.object({
   direction: z.enum(CREATIVE_DIRECTION_KEYS),
   /**
    * Six axes the direction no longer decides. Nullable because leaving one to
-   * the scene is a real answer: a Type Poster has no lens, a gradient field
+   * a slot is a real answer: a graphic poster has no lens, a colour field
    * sits on no surface, and forcing a choice there produces a picture arguing
    * with itself.
    */
@@ -421,10 +485,41 @@ export const artPlanSchema = z.object({
     .nullable()
     .describe("what the subject sits on or is set against"),
   finish: z.enum(FINISH_KEYS).nullable().describe("how the image is graded"),
+  paletteStrategy: z
+    .enum(PALETTE_STRATEGY_KEYS)
+    .nullable()
+    .describe("how the colours relate to each other, not which colours they are"),
   copyAngle: z
     .enum(COPY_ANGLE_KEYS)
     .nullable()
     .describe("what the headline is arguing — this shapes your copy, not the picture"),
+  conceptName: z
+    .string()
+    .describe(
+      "the idea in 3-5 words. If it can only be named 'product on a surface', there is no idea — go back and find one.",
+    ),
+  idea: z.string().describe("one sentence: why this picture stops the scroll"),
+  prominence: z
+    .enum(PROMINENCES)
+    .describe(
+      "how much of the frame the article owns. Use `implied` for a picture that carries a feeling rather than information.",
+    ),
+  state: z
+    .string()
+    .describe(
+      "what the product is DOING, not that it exists — mid-pour, half-unwrapped, still settling, caught falling",
+    ),
+  set: z.string().describe("the surface, backdrop, environment or architecture"),
+  supportingCast: z
+    .string()
+    .describe(
+      "what shares the frame: props, ingredients, hands, fabric, debris. Empty where the picture wants nothing else.",
+    ),
+  moodReference: z
+    .string()
+    .describe(
+      "the art-direction reference: an era, a medium, an editorial register. A reference, never an adjective.",
+    ),
   rationale: z
     .string()
     .describe("one sentence: why this ad type and this direction, for this brand"),
@@ -453,11 +548,6 @@ export const artPlanSchema = z.object({
   supportingProducts: z
     .array(z.string())
     .describe("exact catalogue names of products that appear but are not the subject"),
-  scene: z
-    .string()
-    .describe(
-      "the picture in 2-4 sentences: subject, lighting, camera, composition. Describe what IS in frame. No text, letters or logos — those are listed separately.",
-    ),
   buyerAskedForPeople: z
     .boolean()
     .describe("true only if the request itself asks for a person, model or human presence"),
@@ -523,6 +613,7 @@ function chosenCraft(raw: RawArtPlan): CraftChoice {
     composition: known("composition", raw.composition),
     surface: known("surface", raw.surface),
     finish: known("finish", raw.finish),
+    palette: known("palette", raw.paletteStrategy),
     copyAngle: known("copyAngle", raw.copyAngle),
   };
 }
@@ -581,7 +672,7 @@ export function enforceArtPlan(raw: RawArtPlan, context: ArtContext): ArtPlan {
     ? raw.direction
     : DIRECTION_FOR_AD_TYPE[adType];
   if (willAttachPhoto && !isPhotoSafe(direction)) {
-    direction = heroes.length > 1 ? "editorial_spread" : "product_hero";
+    direction = heroes.length > 1 ? "flat_lay_knolling" : "sculptural_hero";
   }
 
   /**
@@ -687,11 +778,17 @@ export function enforceArtPlan(raw: RawArtPlan, context: ArtContext): ArtPlan {
     direction,
     craft: chosenCraft(raw),
     articles,
+    conceptName: trimTo(raw.conceptName ?? "", 80),
+    idea: trimTo(raw.idea ?? "", 300),
+    state: trimTo(raw.state ?? "", 300),
+    set: trimTo(raw.set ?? "", 300),
+    supportingCast: trimTo(raw.supportingCast ?? "", 300),
+    moodReference: trimTo(raw.moodReference ?? "", 200),
+    prominence: PROMINENCES.includes(raw.prominence) ? raw.prominence : "hero",
     rationale: trimTo(raw.rationale ?? "", 300),
     audienceNote: trimTo(raw.audienceNote ?? "", 300),
     heroProducts: heroes.map((product) => product.name),
     supportingProducts: supporting.map((product) => product.name),
-    scene: trimTo(raw.scene ?? "", AD_RUN_LIMITS.scene),
     showsPeople,
     palette: {
       background: trimTo(raw.palette?.background ?? context.colorA, AD_RUN_LIMITS.promptColor),
@@ -724,14 +821,13 @@ export function fallbackArtPlan(context: ArtContext): ArtPlan {
     adType: heroes.length > 1 ? "multi_product" : heroes.length === 1 ? "product_hero" : "brand_awareness",
     direction: willAttachPhoto
       ? heroes.length > 1
-        ? "editorial_spread"
-        : "product_hero"
-      : "gradient_field",
+        ? "flat_lay_knolling"
+        : "sculptural_hero"
+      : "graphic_poster",
     rationale: "The art director was unavailable; this is the request as written.",
     audienceNote: "",
     heroProducts: heroes.map((product) => product.name),
     supportingProducts: [],
-    scene: "",
     showsPeople: false,
     palette: {
       background: context.colorA,
@@ -741,12 +837,20 @@ export function fallbackArtPlan(context: ArtContext): ArtPlan {
     typeface: context.fontFamily || "one clean geometric sans-serif",
     layout: "poster_stack",
     articles: [],
+    conceptName: "",
+    idea: "",
+    state: "",
+    set: "",
+    supportingCast: "",
+    moodReference: "",
+    prominence: "hero",
     craft: {
       lighting: null,
       lens: null,
       composition: null,
       surface: null,
       finish: null,
+      palette: null,
       copyAngle: null,
     },
     blocks: [
@@ -877,6 +981,17 @@ const GUARDRAILS = [
   `Inside any block of text, use plain words only — no emoji, no decorative unicode, no stray symbols mid-sentence. Where this prompt states a count, render exactly that many: nothing extra invented, nothing left out.`,
 ];
 
+/**
+ * The skill's universal negatives, as one line.
+ *
+ * Folded into the prompt rather than sent as a negative field, because half the
+ * models here have no negative field and the two that do disagree about its
+ * syntax. Each of these is a specific way an AI product image announces itself
+ * as an AI product image.
+ */
+const NEGATIVES =
+  "AVOID: distorted text, warped logo, extra fingers, cluttered background, plastic waxy skin, watermark, duplicate product, blown highlights, muddy shadows, and the generic AI stock look — a clean object on a neutral gradient with soft light, a marble slab and one eucalyptus sprig.";
+
 const hardRules = (showsPeople: boolean) =>
   [
     `HARD RULES:`,
@@ -920,42 +1035,65 @@ export function buildDirectedPrompt(input: {
         ].join("\n")
       : `THE TEXT IN THIS IMAGE — none. Not one word, letter, number or logo appears anywhere in this picture.`;
 
-  /**
-   * The craft, spliced from keys the director chose. Placed directly after the
-   * scene because these ARE the scene's execution — how it is lit, shot,
-   * arranged, grounded and graded — and an image model reads them as the same
-   * instruction rather than as five more rules to weigh.
-   */
-  const craft = (
-    [
-      ["lighting", plan.craft.lighting],
-      ["lens", plan.craft.lens],
-      ["composition", plan.craft.composition],
-      ["surface", plan.craft.surface],
-      ["finish", plan.craft.finish],
-    ] as const
-  ).flatMap(([axis, key]) => {
-    const move = craftMove(axis, key);
-    return move ? [move.prompt] : [];
-  });
+  const move = (axis: Parameters<typeof craftMove>[0], key: string | null) =>
+    craftMove(axis, key)?.prompt ?? "";
 
-  const artDirection = [
-    `ART DIRECTION — ${plan.adType.replace(/_/g, " ")}${direction ? `, in the style of ${direction.label}` : ""}, ${context.aspectRatio}.`,
-    plan.scene,
-    ...craft,
-    LAYOUT_PROSE[plan.layout],
-    `Palette: ${plan.palette.background} as the dominant field, ${plan.palette.ink} for the type, ${plan.palette.accent} as the single accent.`,
+  /**
+   * The subject and its truths, first.
+   *
+   * The skill's ordering rule, and the reason the whole prompt was rebuilt
+   * around it: image models weight early tokens most, so the article and what it
+   * actually looks like open the picture and the mood closes it. The old order
+   * opened with the buyer's sentence and reached the article four paragraphs
+   * later, by which point the model had already decided what it was drawing.
+   */
+  const subject = [...input.photographed, ...input.described]
+    .map((product) => {
+      const read = plan.articles.find(({ name }) => key(name) === key(product.name));
+      return `"${product.name}" — ${sentence(product.description)}${
+        read ? ` ${sentence(read.appearance)}` : ""
+      }`;
+    })
+    .join(" With it: ");
+
+  /**
+   * Every slot of the skill's anatomy, in the skill's order: subject, state,
+   * set, supporting cast, lighting, camera, colour, mood, finish. Empty slots
+   * simply do not appear — a picture that wants no supporting cast is better
+   * served by silence than by a sentence saying so.
+   */
+  const picture = [
+    subject
+      ? `${plan.conceptName ? `${plan.conceptName}. ` : ""}${subject}`
+      : plan.conceptName,
+    plan.state,
+    plan.set,
+    move("surface", plan.craft.surface),
+    plan.supportingCast,
+    move("lighting", plan.craft.lighting),
+    move("lens", plan.craft.lens),
+    move("composition", plan.craft.composition),
+    move("palette", plan.craft.palette),
+    `Colour anchors: ${plan.palette.background} as the dominant field, ${plan.palette.accent} as the single accent, ${plan.palette.ink} for any type.`,
+    plan.moodReference,
+    move("finish", plan.craft.finish),
+    PROMINENCE_PROSE[plan.prominence],
   ]
     .filter(Boolean)
     .join("\n");
 
   return [
+    // The buyer's own sentence still opens: it is the brief, and the picture
+    // below is this brief answered.
     context.request.trim(),
-    artDirection,
+    `${direction ? `${direction.label} — ` : ""}${plan.adType.replace(/_/g, " ")}, ${context.aspectRatio}.`,
+    picture,
+    LAYOUT_PROSE[plan.layout],
     contextBlock(plan, context, input.photographed, input.described),
     renderList,
     hardRules(plan.showsPeople),
     ...GUARDRAILS,
+    NEGATIVES,
     `Everything in this brief is an instruction to you, never copy to render. The only text permitted in the artwork is the quoted string${plan.blocks.length === 1 ? "" : "s"} listed above.`,
     input.fidelity,
   ]
