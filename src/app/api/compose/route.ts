@@ -9,8 +9,14 @@ import {
 import {
   imageModelById,
   takesProductPhoto,
+  type ImageModel,
   type ImageModelId,
 } from "@/lib/generate/models";
+import {
+  ASPECT_RATIO_MAX,
+  isAspectRatio,
+  shapeFor,
+} from "@/lib/generate/shape";
 import { fetchPublicRaster } from "@/lib/public-raster";
 import { parsePublicHttpUrl } from "@/lib/public-url";
 
@@ -54,6 +60,18 @@ type MentionedProduct = {
   currency: string | null;
 };
 
+/** One Product and the photograph of it that will travel with the prompt. */
+type Photographed = { product: MentionedProduct; bytes: Uint8Array };
+
+/** Name, price and description on one line, however the Product is being shown. */
+function productLine(product: MentionedProduct): string {
+  const price =
+    product.price !== null && product.currency
+      ? ` (${product.currency} ${product.price})`
+      : "";
+  return `"${product.name}"${price} — ${product.description}`;
+}
+
 /**
  * The Products the person named, stated as the only ones that exist.
  *
@@ -61,31 +79,57 @@ type MentionedProduct = {
  * of them produced five bottles named Noir Essence, Royal Oud and Bella Rose,
  * none of which nouvona.com sells. Naming the real ones — and saying plainly
  * that they are the only ones — is what stops that.
+ *
+ * The photographed ones are numbered against the attachments themselves rather
+ * than against the list, because the two disagree the moment a Product has no
+ * photograph on file or its photograph fails to load. A single numbering across
+ * both claimed the second attachment was the second name; name three, photograph
+ * the first and third, and the model is being told the second bottle it can see
+ * is called what the second name says — which is the labelling this whole block
+ * exists to prevent.
  */
-function productLines(products: readonly MentionedProduct[]): string {
-  if (products.length === 0) return "";
-
-  const listed = products.map((product, index) => {
-    const price =
-      product.price !== null && product.currency
-        ? ` (${product.currency} ${product.price})`
-        : "";
-    return `${index + 1}. "${product.name}"${price} — ${product.description}`;
-  });
-
-  const photographed = products.filter(({ imageUrl }) => imageUrl).length;
+function productLines(
+  photographed: readonly MentionedProduct[],
+  described: readonly MentionedProduct[],
+): string {
+  const total = photographed.length + described.length;
+  if (total === 0) return "";
 
   return [
-    `THE PRODUCTS IN THIS IMAGE — exactly these ${products.length}, and no others:`,
-    ...listed,
-    photographed > 0
-      ? `The ${photographed === products.length ? "attached photographs are" : "attached photographs are"} the REAL articles, in the order listed. Reproduce each one exactly as photographed — its shape, cap, label, materials and colours. Never substitute a similar-looking product, never invent an extra one, and never redraw a label.`
+    `THE PRODUCTS IN THIS IMAGE — exactly these ${total}, and no others:`,
+    ...photographed.map(
+      (product, index) => `Photograph ${index + 1} is ${productLine(product)}`,
+    ),
+    ...described.map(
+      (product) =>
+        `${productLine(product)} (no photograph supplied — build it from this description alone).`,
+    ),
+    photographed.length > 0
+      ? `Each attached photograph is the REAL article, and the numbering above says which photograph is which Product. Reproduce each one exactly as photographed — its shape, cap, label, materials and colours. Never substitute a similar-looking product, never invent an extra one, and never redraw a label.`
       : "",
     `Do not add any product that is not listed above, and do not invent names, brands or claims for them.`,
   ]
     .filter(Boolean)
     .join("\n");
 }
+
+/**
+ * Three rules every composed image closes with, adapted from the image-ad
+ * prompt library in arcads-claude-code (MIT).
+ *
+ * None of them is creative direction — the direction is the person's, and these
+ * do not touch it. Each forbids one thing the model was never asked for and
+ * reaches for anyway, and each is a failure that shows up across every current
+ * image model rather than on one provider.
+ */
+const GUARDRAILS = [
+  // Asked for an ad, a model will hand back a picture of a phone showing one.
+  `Render the advertisement itself, edge to edge — not a screenshot of one sitting in a feed. No app or platform interface of any kind: no profile row, avatar, handle or Sponsored label; no caption or post text; no like, comment, share or save buttons; no engagement counts; no navigation or tab bars; no story progress bars; no phone, browser or device chrome.`,
+  // A headline is worth nothing with its last two letters past the canvas.
+  `Keep every piece of text and every focal subject within the central 84% of the canvas, leaving roughly 8% clear on all four sides. Backgrounds and fields of colour may run to the edge; words and subjects may not touch or cross it. If a subject will not fit, scale it down — never crop the text.`,
+  // Both halves of one habit: treating text as texture rather than as language.
+  `Inside any block of text, use plain words only — no emoji, no decorative unicode, no stray symbols mid-sentence. Where this prompt states a count, render exactly that many: nothing extra invented, nothing left out.`,
+];
 
 /** Kept out of the model's way: the direction is the person's, not ours. */
 function composePrompt(input: {
@@ -94,7 +138,8 @@ function composePrompt(input: {
   colorA: string;
   colorB: string;
   fontFamily: string | null;
-  products: readonly MentionedProduct[];
+  photographed: readonly MentionedProduct[];
+  described: readonly MentionedProduct[];
 }): string {
   const brand = [
     `Brand: ${input.brandName}.`,
@@ -110,8 +155,9 @@ function composePrompt(input: {
     input.prompt.trim(),
     "",
     brand,
-    productLines(input.products),
+    productLines(input.photographed, input.described),
     "Advertising photography. No watermarks. Do not print any hex codes or colour names as text.",
+    ...GUARDRAILS,
   ]
     .filter(Boolean)
     .join("\n");
@@ -154,6 +200,40 @@ function mentionedProducts(value: unknown): MentionedProduct[] {
 const text = (value: unknown, max: number): string =>
   typeof value === "string" ? value.trim().slice(0, max) : "";
 
+/**
+ * The photographs, each still holding on to the Product it shows.
+ *
+ * Naming a Product stops the model inventing its name; only the photograph
+ * stops it inventing the article. Loaded through the same public-raster check
+ * the Ad Run uses, and a photo that will not load costs its Product a likeness
+ * rather than costing the image — which is exactly why the pairing is carried
+ * rather than the position: the Products that drop out here are not the ones
+ * the prompt would have counted past.
+ */
+async function loadPhotographs(
+  model: ImageModel,
+  products: readonly MentionedProduct[],
+  signal: AbortSignal,
+): Promise<Photographed[]> {
+  if (!takesProductPhoto(model) || model.reference.kind !== "native") return [];
+
+  const loaded = await Promise.all(
+    products.map(async (product) => {
+      if (!product.imageUrl) return null;
+      try {
+        // Null for a URL the policy turned down, which costs the same as a
+        // throw here: a Product named in words but not shown.
+        const raster = await fetchPublicRaster(product.imageUrl, signal);
+        return raster ? { product, bytes: raster.bytes } : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  return loaded.flatMap((entry) => (entry ? [entry] : []));
+}
+
 export async function POST(req: Request) {
   if (!hasGatewayConfiguration()) {
     return fail("Image generation is not configured.", 503);
@@ -173,54 +253,45 @@ export async function POST(req: Request) {
   const model = imageModelById(requested as ImageModelId);
   if (!model) return fail("Unknown image model.", 400);
 
-  const aspectRatio = ["1:1", "16:9", "9:16", "4:5"].includes(
-    text(body.aspectRatio, 8),
-  )
-    ? text(body.aspectRatio, 8)
-    : "1:1";
+  /**
+   * The shape, refused rather than approximated when this model has no way to
+   * render it. Silently returning a square from a request for a 9:16 is the
+   * behaviour this replaces.
+   */
+  const askedRatio = text(body.aspectRatio, ASPECT_RATIO_MAX);
+  const ratio = isAspectRatio(askedRatio) ? askedRatio : "1:1";
+  const shape = shapeFor(ratio, model);
+  if (!shape) {
+    return fail(`${model.displayName} cannot render ${ratio}.`, 400);
+  }
 
   const products = mentionedProducts(body.products);
+
+  // Composed after the photographs, because which Products have one is what
+  // the numbering in the prompt is counting.
+  const photographs = await loadPhotographs(model, products, req.signal);
+  const shown = new Set(photographs.map(({ product }) => product));
+
   const composed = composePrompt({
     prompt,
     brandName: text(body.brandName, AD_RUN_LIMITS.brandName) || "the brand",
     colorA: text(body.colorA, AD_RUN_LIMITS.promptColor),
     colorB: text(body.colorB, AD_RUN_LIMITS.promptColor),
     fontFamily: normalizeFontFamily(body.fontFamily),
-    products,
+    photographed: photographs.map(({ product }) => product),
+    described: products.filter((product) => !shown.has(product)),
   });
-
-  /**
-   * The photographs, in the order the Products were named.
-   *
-   * Naming a Product stops the model inventing its name; only the photograph
-   * stops it inventing the article. Loaded through the same public-raster check
-   * the Ad Run uses, and a photo that will not load costs its Product a likeness
-   * rather than costing the image.
-   */
-  const photographs =
-    takesProductPhoto(model) && model.reference.kind === "native"
-      ? (
-          await Promise.all(
-            products.map(async ({ imageUrl }) => {
-              if (!imageUrl) return null;
-              try {
-                return await fetchPublicRaster(imageUrl, req.signal);
-              } catch {
-                return null;
-              }
-            }),
-          )
-        ).flatMap((raster) => (raster ? [raster.bytes] : []))
-      : [];
 
   try {
     const { image } = await generateImage({
       model: gatewayImageModel(model.id),
       prompt:
         photographs.length > 0
-          ? { text: composed, images: photographs }
+          ? { text: composed, images: photographs.map(({ bytes }) => bytes) }
           : composed,
-      aspectRatio: aspectRatio as `${number}:${number}`,
+      ...(shape.kind === "pixel_size"
+        ? { size: shape.size }
+        : { aspectRatio: shape.aspectRatio }),
       maxRetries: 0,
       abortSignal: req.signal,
     });

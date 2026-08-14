@@ -55,6 +55,11 @@ import {
   takesProductPhoto,
   type ImageModelId,
 } from "@/lib/generate/models";
+import {
+  nearestRatio,
+  supportedRatios,
+  type AspectRatio,
+} from "@/lib/generate/shape";
 import type { AdMakerController, AdSlot } from "@/hooks/use-ad-maker";
 
 type IdleController = Extract<AdMakerController, { phase: "idle" }>;
@@ -1629,7 +1634,19 @@ type Composition = {
 function Studio({ s }: { s: StudioController }) {
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState<ImageModelId>(IMAGE_MODELS[0].id);
-  const [aspectRatio, setAspectRatio] = useState("1:1");
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>("1:1");
+
+  /**
+   * The models do not offer the same shapes, so choosing one can retire the
+   * shape already chosen. Carrying the nearest across keeps a portrait a
+   * portrait instead of asking for something the model would answer with a
+   * square.
+   */
+  const chooseModel = (next: ImageModelId) => {
+    setModel(next);
+    const chosen = imageModelById(next);
+    if (chosen) setAspectRatio((was) => nearestRatio(was, chosen));
+  };
   const [made, setMade] = useState<readonly Composition[]>([]);
   /**
    * Every Product named so far. The text stays the source of truth — this is
@@ -1779,7 +1796,7 @@ function Studio({ s }: { s: StudioController }) {
           prompt={prompt}
           setPrompt={setPrompt}
           model={model}
-          setModel={setModel}
+          setModel={chooseModel}
           aspectRatio={aspectRatio}
           setAspectRatio={setAspectRatio}
           products={s.products}
@@ -2405,8 +2422,8 @@ function Composer({
   setPrompt: (next: string) => void;
   model: ImageModelId;
   setModel: (next: ImageModelId) => void;
-  aspectRatio: string;
-  setAspectRatio: (next: string) => void;
+  aspectRatio: AspectRatio;
+  setAspectRatio: (next: AspectRatio) => void;
   /** The catalogue an "@" searches. */
   products: readonly Product[];
   /** Records what was named, so its photograph can travel with the request. */
@@ -2418,6 +2435,11 @@ function Composer({
 
   const matches = mention ? matchProducts(products, mention.query) : [];
   const open = mention !== null && matches.length > 0;
+
+  // Only what this model can actually render: the rest come back as its own
+  // default shape without saying they have.
+  const chosen = imageModelById(model);
+  const ratios = chosen ? supportedRatios(chosen) : (["1:1"] as const);
 
   /** Recomputed from the caret on every change, so it closes as soon as it should. */
   const syncMention = (element: HTMLTextAreaElement) => {
@@ -2561,11 +2583,8 @@ function Composer({
             <ComposerSelect
               label="Ratio"
               value={aspectRatio}
-              onChange={setAspectRatio}
-              options={["1:1", "4:5", "16:9", "9:16"].map((r) => ({
-                value: r,
-                label: r,
-              }))}
+              onChange={(v) => setAspectRatio(v as AspectRatio)}
+              options={ratios.map((r) => ({ value: r, label: r }))}
             />
             <div className="flex-1" />
             <button
