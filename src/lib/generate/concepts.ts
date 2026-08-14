@@ -1,7 +1,11 @@
 import "server-only";
 
 import type { ConceptSubject } from "@/lib/ad-run";
-import type { CreativeDirectionKey } from "./directions";
+import {
+  CREATIVE_DIRECTIONS,
+  CREATIVE_DIRECTION_KEYS,
+  type CreativeDirectionKey,
+} from "./directions";
 
 /** Server-only prompt implementations for the cross-runtime direction catalog. */
 
@@ -113,7 +117,40 @@ const brandLine = (p: PromptInput) =>
 
 type PromptBuilder = (input: PromptInput) => string;
 
-const PROMPT_BUILDERS = {
+/**
+ * The picture a Direction describes when nothing wrote one for this ad.
+ *
+ * Assembled from the Direction's own `rules`, which is what that field was for:
+ * the twelve paragraphs below were distilled into rules precisely so a rule set
+ * could stand in for its paragraph. It costs some of the prose — a hand-written
+ * sentence about phosphor glow reads better than a bulleted one — and it buys
+ * the thing that matters more, which is that the catalogue can grow without
+ * every new Direction owing a paragraph before it is allowed to exist.
+ */
+function fromRules(key: CreativeDirectionKey): PromptBuilder {
+  const direction = CREATIVE_DIRECTIONS.find((c) => c.key === key);
+  return (p) =>
+    [
+      `A premium square 1:1 advertisement${direction ? ` in the style of ${direction.label}` : ""}.`,
+      brandLine(p),
+      direction
+        ? [
+            `Build the picture to these rules, in ${p.colorA} with accents of ${p.colorB}:`,
+            ...direction.rules.map((rule) => `• ${rule}`),
+          ].join("\n")
+        : `A confident, well-composed advertising image in ${p.colorA} with accents of ${p.colorB}.`,
+      typography(p),
+      hardRules(p.showsPeople),
+    ].join("\n\n");
+}
+
+/**
+ * The hand-written paragraphs, for the Directions that have one. Every other
+ * key falls to `fromRules`, which is why this is a partial record rather than a
+ * total one — a Direction is a set of rules first, and a paragraph only where
+ * one was worth writing.
+ */
+const PROMPT_OVERRIDES = {
   product_hero: (p) =>
     [
       `A premium square 1:1 editorial advertisement: a single hero product shot with dramatic studio lighting.`,
@@ -210,7 +247,17 @@ const PROMPT_BUILDERS = {
       typography(p),
       hardRules(p.showsPeople),
     ].join("\n\n"),
-} satisfies Record<CreativeDirectionKey, PromptBuilder>;
+} satisfies Partial<Record<CreativeDirectionKey, PromptBuilder>>;
+
+const PROMPT_BUILDERS: Record<CreativeDirectionKey, PromptBuilder> =
+  Object.fromEntries(
+    CREATIVE_DIRECTION_KEYS.map((key) => [
+      key,
+      (PROMPT_OVERRIDES as Partial<Record<CreativeDirectionKey, PromptBuilder>>)[
+        key
+      ] ?? fromRules(key),
+    ]),
+  ) as Record<CreativeDirectionKey, PromptBuilder>;
 
 /**
  * The prompt for one ad, without the buyer's request.

@@ -1,6 +1,15 @@
 import { z } from "zod";
 import { AD_RUN_LIMITS } from "@/lib/ad-run-policy";
 import {
+  COMPOSITION_KEYS,
+  COPY_ANGLE_KEYS,
+  FINISH_KEYS,
+  LENS_KEYS,
+  LIGHTING_KEYS,
+  SURFACE_KEYS,
+  craftMove,
+} from "./craft";
+import {
   CREATIVE_DIRECTION_KEYS,
   directionByKey,
   isPhotoSafe,
@@ -298,9 +307,25 @@ export type ArtContext = {
   photographCapacity: number;
 };
 
+/**
+ * The craft the director chose, by key. Null on any axis it left to the scene —
+ * a Type Poster needs no lens, and a director that names one anyway has decided
+ * something the picture did not ask it to decide.
+ */
+export type CraftChoice = {
+  lighting: string | null;
+  lens: string | null;
+  composition: string | null;
+  surface: string | null;
+  finish: string | null;
+  /** Never reaches the image. It shaped the headline before the picture existed. */
+  copyAngle: string | null;
+};
+
 export type ArtPlan = {
   adType: AdType;
   direction: CreativeDirectionKey;
+  craft: CraftChoice;
   /** Why this direction, in the director's words. Shown, logged, never rendered. */
   rationale: string;
   /** Who this ad is talking to, as the director read it. Never rendered. */
@@ -337,6 +362,27 @@ const textBlockSchema = z.object({
 export const artPlanSchema = z.object({
   adType: z.enum(AD_TYPES),
   direction: z.enum(CREATIVE_DIRECTION_KEYS),
+  /**
+   * Six axes the direction no longer decides. Nullable because leaving one to
+   * the scene is a real answer: a Type Poster has no lens, a gradient field
+   * sits on no surface, and forcing a choice there produces a picture arguing
+   * with itself.
+   */
+  lighting: z.enum(LIGHTING_KEYS).nullable().describe("how the subject is lit"),
+  lens: z.enum(LENS_KEYS).nullable().describe("what it is shot on, and from where"),
+  composition: z
+    .enum(COMPOSITION_KEYS)
+    .nullable()
+    .describe("how the frame is divided"),
+  surface: z
+    .enum(SURFACE_KEYS)
+    .nullable()
+    .describe("what the subject sits on or is set against"),
+  finish: z.enum(FINISH_KEYS).nullable().describe("how the image is graded"),
+  copyAngle: z
+    .enum(COPY_ANGLE_KEYS)
+    .nullable()
+    .describe("what the headline is arguing — this shapes your copy, not the picture"),
   rationale: z
     .string()
     .describe("one sentence: why this ad type and this direction, for this brand"),
@@ -401,6 +447,28 @@ export function priceText(product: CatalogProduct): string | null {
     ? String(product.price)
     : product.price.toFixed(2);
   return `${product.currency} ${amount}`;
+}
+
+/**
+ * The craft keys the catalogues actually hold.
+ *
+ * A key no axis knows is dropped rather than passed through: an unknown move
+ * has no sentence to splice, so carrying it would put a bare identifier like
+ * `rembrandt_v2` into an image prompt, which is exactly the kind of stray
+ * string this module exists to keep off a canvas.
+ */
+function chosenCraft(raw: RawArtPlan): CraftChoice {
+  const known = (axis: Parameters<typeof craftMove>[0], key: string | null) =>
+    craftMove(axis, key)?.key ?? null;
+
+  return {
+    lighting: known("lighting", raw.lighting),
+    lens: known("lens", raw.lens),
+    composition: known("composition", raw.composition),
+    surface: known("surface", raw.surface),
+    finish: known("finish", raw.finish),
+    copyAngle: known("copyAngle", raw.copyAngle),
+  };
 }
 
 /** Catalogue entries by name, the person's own choices first. */
@@ -548,6 +616,7 @@ export function enforceArtPlan(raw: RawArtPlan, context: ArtContext): ArtPlan {
   return {
     adType,
     direction,
+    craft: chosenCraft(raw),
     rationale: trimTo(raw.rationale ?? "", 300),
     audienceNote: trimTo(raw.audienceNote ?? "", 300),
     heroProducts: heroes.map((product) => product.name),
@@ -601,6 +670,14 @@ export function fallbackArtPlan(context: ArtContext): ArtPlan {
     },
     typeface: context.fontFamily || "one clean geometric sans-serif",
     layout: "poster_stack",
+    craft: {
+      lighting: null,
+      lens: null,
+      composition: null,
+      surface: null,
+      finish: null,
+      copyAngle: null,
+    },
     blocks: [
       {
         role: "brand",
@@ -752,9 +829,29 @@ export function buildDirectedPrompt(input: {
         ].join("\n")
       : `THE TEXT IN THIS IMAGE — none. Not one word, letter, number or logo appears anywhere in this picture.`;
 
+  /**
+   * The craft, spliced from keys the director chose. Placed directly after the
+   * scene because these ARE the scene's execution — how it is lit, shot,
+   * arranged, grounded and graded — and an image model reads them as the same
+   * instruction rather than as five more rules to weigh.
+   */
+  const craft = (
+    [
+      ["lighting", plan.craft.lighting],
+      ["lens", plan.craft.lens],
+      ["composition", plan.craft.composition],
+      ["surface", plan.craft.surface],
+      ["finish", plan.craft.finish],
+    ] as const
+  ).flatMap(([axis, key]) => {
+    const move = craftMove(axis, key);
+    return move ? [move.prompt] : [];
+  });
+
   const artDirection = [
     `ART DIRECTION — ${plan.adType.replace(/_/g, " ")}${direction ? `, in the style of ${direction.label}` : ""}, ${context.aspectRatio}.`,
     plan.scene,
+    ...craft,
     LAYOUT_PROSE[plan.layout],
     `Palette: ${plan.palette.background} as the dominant field, ${plan.palette.ink} for the type, ${plan.palette.accent} as the single accent.`,
   ]

@@ -13,6 +13,15 @@ import {
   type ArtPlan,
   type CatalogProduct,
 } from "./art-plan";
+import {
+  COMPOSITIONS,
+  COPY_ANGLES,
+  FINISHES,
+  LENSES,
+  LIGHTING,
+  SURFACES,
+  craftMenu,
+} from "./craft";
 import { CREATIVE_DIRECTIONS } from "./directions";
 import { gatewayTextModel } from "./gateway";
 
@@ -134,11 +143,25 @@ function buildPrompt(context: ArtContext): string {
       "\n",
     ),
     [
-      "CREATIVE DIRECTIONS — each is a set of rules to write to, not text to copy:",
+      "CREATIVE DIRECTIONS — what the picture is OF. Each is a set of rules to write to, not text to copy:",
       ...CREATIVE_DIRECTIONS.flatMap((c) => [
         `- ${c.key} (${c.label}) — best for: ${c.bestFor}`,
         ...c.rules.map((rule) => `    · ${rule}`),
       ]),
+    ].join("\n"),
+    /**
+     * Keys and labels only. The sentence each one expands into is spliced in
+     * after the answer comes back, so a menu of a hundred and thirty-two moves
+     * costs a line each here instead of a paragraph each.
+     */
+    [
+      "THE CRAFT — how the picture is MADE. Choose one key per axis, or null where the axis does not apply to this picture. Any combination is valid; these are deliberately independent of each other and of the direction, so compose rather than reach for the obvious pairing.",
+      `LIGHTING: ${craftMenu(LIGHTING)}`,
+      `LENS: ${craftMenu(LENSES)}`,
+      `COMPOSITION: ${craftMenu(COMPOSITIONS)}`,
+      `SURFACE: ${craftMenu(SURFACES)}`,
+      `FINISH: ${craftMenu(FINISHES)}`,
+      `COPY ANGLE — this one shapes your headline and never the picture: ${craftMenu(COPY_ANGLES)}`,
     ].join("\n"),
   ]
     .filter(Boolean)
@@ -154,7 +177,11 @@ function buildSystem(context: ArtContext): string {
       "THE TEXT LIST is the contract that matters most. `blocks` is the complete and exclusive list of strings that will exist in the picture. Anything you leave out cannot appear; anything you put in will appear exactly as you typed it, so type it exactly. Give every block its role, its cap height as a percentage of the image height, its weight, its case and its position — you are setting the type, not describing it. The headline is always the largest block.",
       "For a `price` block write nothing you invented: the real listed price is substituted from the catalogue, and a price block is dropped entirely unless the rules above allow one.",
     ].join("\n"),
-    "THE SCENE is the picture itself, in 2-4 sentences: subject, lighting, camera and composition. Describe what IS in frame — an image model renders what it is told to picture, so 'empty studio, one object' works where 'no clutter' does not. Name at most three things in frame. Never put text, words, letters, numbers or logos in the scene; they are composed separately from your text list.",
+    [
+      "THE SCENE is the picture itself, in 2-4 sentences: what is in frame, and what it is doing. Describe what IS there — an image model renders what it is told to picture, so 'empty studio, one object' works where 'no clutter' does not. Name at most three things in frame. Never put text, words, letters, numbers or logos in the scene; they are composed separately from your text list.",
+      "THE CRAFT AXES carry the light, the lens, the arrangement, the ground and the grade, so the scene does not have to. Do not spend the scene restating a choice an axis has already made.",
+      "Reach past the obvious combination. A studio hero lit by a wrapped softbox on seamless paper is correct and forgettable; the same article on wet black marble under one hard split light is the same information and a better advertisement. The axes are independent for exactly this reason.",
+    ].join("\n"),
     context.language
       ? `WRITE THE COPY IN THE SHOP'S OWN LANGUAGE (${context.language}), in that script, unless the request itself is written in another language — then follow the request.`
       : "",

@@ -1,7 +1,10 @@
 import { expect, test } from "vitest";
+import { AD_RUN_MAX_SIZE } from "@/lib/ad-run-policy";
 import {
   CREATIVE_DIRECTIONS,
+  PHOTO_SAFE_DIRECTIONS,
   directionByKey,
+  isPhotoSafe,
   type CreativeDirectionKey,
 } from "./directions";
 import {
@@ -16,9 +19,36 @@ import {
 
 test("direction metadata is the source of typed keys and lookup results", () => {
   const key: CreativeDirectionKey = "typographic";
-  expect(CREATIVE_DIRECTIONS).toHaveLength(12);
   expect(directionByKey(key)?.label).toBe("Type Poster");
   expect(directionByKey("not-a-direction")).toBeUndefined();
+});
+
+/**
+ * Invariants rather than a count. The catalogue is meant to grow — a library
+ * that costs a test edit every time a direction is added is a library nobody
+ * adds to — so what is pinned is what an Ad Run actually depends on.
+ */
+test("every direction is distinct, named, and carries rules to write to", () => {
+  expect(CREATIVE_DIRECTIONS.length).toBeGreaterThanOrEqual(AD_RUN_MAX_SIZE);
+  expect(new Set(CREATIVE_DIRECTIONS.map(({ key }) => key)).size).toBe(
+    CREATIVE_DIRECTIONS.length,
+  );
+
+  for (const direction of CREATIVE_DIRECTIONS) {
+    expect(direction.label).not.toBe("");
+    expect(direction.bestFor).not.toBe("");
+    expect(direction.rules.length).toBeGreaterThan(0);
+  }
+});
+
+/** A photo-safe key that no longer exists silently stops steering anything. */
+test("every photo-safe direction is a direction the catalogue holds", () => {
+  for (const key of PHOTO_SAFE_DIRECTIONS) {
+    expect(directionByKey(key)).toBeDefined();
+    expect(isPhotoSafe(key)).toBe(true);
+  }
+  // An Ad Run can draw six distinct directions for photographed articles alone.
+  expect(PHOTO_SAFE_DIRECTIONS.size).toBeGreaterThanOrEqual(AD_RUN_MAX_SIZE);
 });
 
 test("Image Model records own tier, display name, and image-input capability", () => {

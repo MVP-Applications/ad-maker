@@ -54,6 +54,12 @@ const block = (extra: Partial<RawArtPlan["blocks"][number]> = {}) => ({
 const plan = (extra: Partial<RawArtPlan> = {}): RawArtPlan => ({
   adType: "product_hero",
   direction: "product_hero",
+  lighting: "rembrandt",
+  lens: "portrait_85",
+  composition: "thirds_right",
+  surface: "wet_black_marble",
+  finish: "portra_warm",
+  copyAngle: "understatement",
   rationale: "A physical article deserves a hero shot.",
   audienceNote: "Gift buyers.",
   heroProducts: [],
@@ -267,6 +273,22 @@ describe("choosing the subject", () => {
     expect(enforced.heroProducts).toEqual(["Oud Royal"]);
   });
 
+  /** A move no catalogue holds has no sentence to splice, so it is not a move. */
+  it("drops a craft key the library does not hold", () => {
+    const enforced = enforceArtPlan(
+      plan({
+        lighting: "rembrandt_v2" as never,
+        // A real key, but on the wrong axis.
+        lens: "rembrandt" as never,
+      }),
+      context(),
+    );
+
+    expect(enforced.craft.lighting).toBeNull();
+    expect(enforced.craft.lens).toBeNull();
+    expect(enforced.craft.surface).toBe("wet_black_marble");
+  });
+
   it("never lists the same Product twice, or in both roles", () => {
     const enforced = enforceArtPlan(
       plan({
@@ -393,6 +415,38 @@ describe("the prompt", () => {
       text.indexOf("THE TEXT IN THIS IMAGE"),
     );
     expect(text).not.toContain('"SAR 450"');
+  });
+
+  /**
+   * The director chooses by key; the sentence is spliced here. A key that
+   * reached the canvas as a bare identifier would be exactly the kind of stray
+   * string the render list exists to keep out.
+   */
+  it("splices the craft the director chose, as sentences", () => {
+    const text = built();
+
+    expect(text).toContain("One hard key light 45 degrees off-axis");
+    expect(text).toContain("Shot on an 85mm lens at f/2");
+    expect(text).toContain("Polished black marble");
+    expect(text).toContain("warm colour negative film");
+    expect(text).not.toContain("rembrandt");
+    expect(text).not.toContain("portrait_85");
+  });
+
+  it("says nothing about an axis the picture did not need", () => {
+    const text = built({ lens: null, surface: null, finish: null });
+
+    expect(text).toContain("One hard key light 45 degrees off-axis");
+    expect(text).not.toContain("85mm");
+    expect(text).not.toContain("marble");
+  });
+
+  /** The copy angle argued the headline into existence; it is not a picture. */
+  it("keeps the copy angle out of the image entirely", () => {
+    const text = built({ copyAngle: "understatement" });
+
+    expect(text).not.toContain("Confidence reads as restraint");
+    expect(text).not.toContain("understatement");
   });
 
   it("says plainly when a picture carries no words at all", () => {

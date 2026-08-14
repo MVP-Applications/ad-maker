@@ -45,6 +45,12 @@ const directs = (plan: Partial<RawArtPlan>) =>
       {
         adType: "product_hero",
         direction: "product_hero",
+        lighting: null,
+        lens: null,
+        composition: null,
+        surface: null,
+        finish: null,
+        copyAngle: null,
         rationale: "",
         audienceNote: "",
         heroProducts: [],

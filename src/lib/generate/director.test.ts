@@ -52,6 +52,12 @@ describe("the art director", () => {
       object: {
         adType: "product_hero",
         direction: "product_hero",
+        lighting: "split_light",
+        lens: "portrait_85",
+        composition: "thirds_right",
+        surface: "wet_black_marble",
+        finish: "portra_warm",
+        copyAngle: "understatement",
         rationale: "A physical article deserves a hero shot.",
         audienceNote: "Gift buyers.",
         heroProducts: ["Oud Royal"],
@@ -116,6 +122,37 @@ describe("the art director", () => {
     // Every direction it may choose, with the rules that bound each one.
     expect(prompt).toContain("product_hero (Product Hero) — best for:");
     expect(prompt).toContain("retro_arcade (Retro Arcade) — best for:");
+  });
+
+  /**
+   * The craft menu is the reason the library can be this large: keys and names
+   * only, so a hundred and thirty-two moves cost a line each rather than a
+   * paragraph each, and the prose is spliced in after the answer comes back.
+   */
+  it("is offered every craft axis by name, and charged for none of the prose", async () => {
+    await directArtwork(context());
+
+    const { prompt } = answered();
+    expect(prompt).toContain("LIGHTING: rembrandt (Rembrandt key)");
+    expect(prompt).toContain("LENS: portrait_85 (85mm portrait)");
+    expect(prompt).toContain("COMPOSITION: thirds_right");
+    expect(prompt).toContain("SURFACE: seamless_paper");
+    expect(prompt).toContain("FINISH: portra_warm");
+    expect(prompt).toContain("COPY ANGLE");
+    expect(prompt).not.toContain("One hard key light 45 degrees off-axis");
+  });
+
+  it("returns the craft it chose, ready to splice", async () => {
+    const plan = await directArtwork(context());
+
+    expect(plan.craft).toEqual({
+      lighting: "split_light",
+      lens: "portrait_85",
+      composition: "thirds_right",
+      surface: "wet_black_marble",
+      finish: "portra_warm",
+      copyAngle: "understatement",
+    });
   });
 
   it("never shows the same Product twice when the buyer named it", async () => {

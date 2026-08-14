@@ -150,6 +150,297 @@ export const CREATIVE_DIRECTIONS = [
       "playful but rigorously composed, like a gallery poster",
     ],
   },
+
+  /**
+   * The second twenty-eight.
+   *
+   * The first twelve covered the styles an Ad Run needs to fill six slots
+   * without repeating itself, and they were written when a direction had to
+   * carry a whole picture on its own. These are written for a director that
+   * composes: each one says what the picture is OF and leaves the light, the
+   * lens, the surface and the grade to the axes in `craft.ts`, which is why
+   * they read shorter than the twelve above rather than thinner.
+   */
+  {
+    key: "in_hand",
+    label: "In Hand",
+    bestFor: "small objects, tools, cosmetics, anything whose scale matters",
+    rules: [
+      "the article held or being used, so its real size is unmistakable",
+      "the hand and the setting deliberately understated",
+      "the article kept sharp and fully readable at all times",
+    ],
+  },
+  {
+    key: "unboxing",
+    label: "Unboxing",
+    bestFor: "premium packaging, gifts, subscription products",
+    rules: [
+      "the article emerging from its packaging, the box part of the picture",
+      "tissue, moulded insert or wrap still in frame",
+      "the moment just before it is fully revealed",
+    ],
+  },
+  {
+    key: "exploded_view",
+    label: "Exploded View",
+    bestFor: "engineered goods, kits, anything with parts worth showing",
+    rules: [
+      "the article separated into its components, floating in ordered space",
+      "even spacing along one axis, every part legible",
+      "no annotation, no numbering, no callout text",
+    ],
+  },
+  {
+    key: "knolling",
+    label: "Knolling",
+    bestFor: "kits, ranges, tool sets, anything that comes as a collection",
+    rules: [
+      "every object laid out flat and photographed from directly above",
+      "objects aligned to a strict grid at right angles",
+      "even spacing, even light, nothing overlapping",
+    ],
+  },
+  {
+    key: "still_life_classical",
+    label: "Classical Still Life",
+    bestFor: "food, drink, fragrance, heritage brands",
+    rules: [
+      "a painterly arrangement in the manner of a Dutch still life",
+      "deep shadow, one directional light, rich muted colour",
+      "fruit, cloth, glass or vessel arranged around the article",
+    ],
+  },
+  {
+    key: "levitation",
+    label: "Levitation",
+    bestFor: "tech, footwear, anything that wants to feel weightless",
+    rules: [
+      "the article suspended in mid-air with nothing supporting it",
+      "a shadow beneath it on a distant surface, proving the height",
+      "absolute stillness — this is a float, not a throw",
+    ],
+  },
+  {
+    key: "splash_freeze",
+    label: "Frozen Motion",
+    bestFor: "drinks, liquids, sport, anything kinetic",
+    rules: [
+      "a single instant of movement frozen absolutely sharp",
+      "liquid, powder or fabric caught mid-air around the article",
+      "the article itself perfectly still at the centre of it",
+    ],
+  },
+  {
+    key: "cross_section",
+    label: "Cross Section",
+    bestFor: "layered products, food, materials, engineered goods",
+    rules: [
+      "the article cut cleanly in half to reveal its interior",
+      "the cut face square to the camera and fully in focus",
+      "the layers or internals as the actual subject",
+    ],
+  },
+  {
+    key: "scale_miniature",
+    label: "Miniature World",
+    bestFor: "services, platforms, anything abstract that needs a metaphor",
+    rules: [
+      "a tiny constructed world built around or on the article",
+      "miniature figures or scenery at model-railway scale",
+      "the article rendered at full size, so the scale contrast is the idea",
+    ],
+  },
+  {
+    key: "shadow_play",
+    label: "Shadow Play",
+    bestFor: "minimalist brands, architecture, fashion",
+    rules: [
+      "the shadow doing more work than the object casting it",
+      "one hard light and a shape that throws a graphic shadow",
+      "vast plain surface for the shadow to fall across",
+    ],
+  },
+  {
+    key: "reflection_double",
+    label: "Doubled",
+    bestFor: "luxury, beauty, anything symmetrical",
+    rules: [
+      "the article and its reflection both fully in frame",
+      "a mirror-flat surface directly beneath or beside it",
+      "the reflection sharp enough to read as a second subject",
+    ],
+  },
+  {
+    key: "texture_wall",
+    label: "Texture Wall",
+    bestFor: "materials, fashion, interiors, tactile goods",
+    rules: [
+      "a single material filling the entire background as a flat wall",
+      "the article set against it with almost no depth",
+      "the contrast between the two surfaces carrying the picture",
+    ],
+  },
+  {
+    key: "archival_document",
+    label: "Archival",
+    bestFor: "heritage brands, publishers, institutions, anniversaries",
+    rules: [
+      "the look of a document photographed from an archive",
+      "aged paper, filing marks, the patina of something kept",
+      "no invented dates, stamps, seals or written words",
+    ],
+  },
+  {
+    key: "botanical_study",
+    label: "Botanical Study",
+    bestFor: "beauty, wellness, food, natural ingredients",
+    rules: [
+      "plants and raw ingredients arranged as a specimen study",
+      "even, precise light and a plain ground",
+      "the article among them as one specimen of several",
+    ],
+  },
+  {
+    key: "ingredient_deconstruction",
+    label: "Ingredients",
+    bestFor: "food, drink, cosmetics, supplements",
+    rules: [
+      "what the article is made from, laid out around it",
+      "raw components in their unprocessed state",
+      "only ingredients the brand actually names",
+    ],
+  },
+  {
+    key: "street_documentary",
+    label: "Street Documentary",
+    bestFor: "streetwear, footwear, urban and youth brands",
+    rules: [
+      "the unposed feel of a photograph taken in the street",
+      "real city surfaces, real weather, nothing art-directed",
+      "the article present in the scene rather than presented by it",
+    ],
+  },
+  {
+    key: "interior_scene",
+    label: "Interior",
+    bestFor: "furniture, homeware, appliances, interiors",
+    rules: [
+      "the article in a real room, placed where it would actually live",
+      "architecture and daylight doing the composition",
+      "the room designed and quiet, never staged with clutter",
+    ],
+  },
+  {
+    key: "workspace_scene",
+    label: "Workspace",
+    bestFor: "hardware, software, tools, professional goods",
+    rules: [
+      "a working desk or bench mid-task rather than tidied",
+      "the article in use position, surrounded by the work it serves",
+      "at most two supporting objects in frame",
+    ],
+  },
+  {
+    key: "landscape_scale",
+    label: "Landscape",
+    bestFor: "outdoor, travel, automotive, energy, infrastructure",
+    rules: [
+      "an expansive natural landscape with the article small within it",
+      "the horizon and the weather as the real subject",
+      "scale contrast carrying the whole idea",
+    ],
+  },
+  {
+    key: "aerial_pattern",
+    label: "Aerial",
+    bestFor: "logistics, agriculture, travel, infrastructure",
+    rules: [
+      "the ground seen from far above, flattened into pattern",
+      "roads, fields, water or architecture reading as abstract geometry",
+      "one element breaking the pattern",
+    ],
+  },
+  {
+    key: "night_city",
+    label: "Night City",
+    bestFor: "nightlife, entertainment, spirits, urban tech",
+    rules: [
+      "a city after dark, lit entirely by its own lights",
+      "wet surfaces multiplying every light source",
+      "deep shadow between the lit areas",
+    ],
+  },
+  {
+    key: "liquid_suspension",
+    label: "Suspension",
+    bestFor: "fragrance, serums, drinks, chemistry",
+    rules: [
+      "the article submerged or suspended in a clear fluid",
+      "bubbles, refraction and slow drift around it",
+      "the fluid tinted with the brand's own colour",
+    ],
+  },
+  {
+    key: "smoke_atmosphere",
+    label: "Atmosphere",
+    bestFor: "fragrance, spirits, audio, anything sensory",
+    rules: [
+      "drifting smoke, mist or vapour filling the space around the article",
+      "a single light beam giving the atmosphere its shape",
+      "the article emerging from it rather than hidden by it",
+    ],
+  },
+  {
+    key: "kinetic_streak",
+    label: "Kinetic",
+    bestFor: "sport, automotive, delivery, performance products",
+    rules: [
+      "movement rendered as light trails and directional blur",
+      "the article held sharp while the world around it smears",
+      "one clear direction of travel through the frame",
+    ],
+  },
+  {
+    key: "grid_system",
+    label: "Grid System",
+    bestFor: "ranges, catalogues, comparison, platform brands",
+    rules: [
+      "the frame divided into an even grid of equal cells",
+      "one subject or colour field per cell, consistently lit",
+      "one cell deliberately different from the rest",
+    ],
+  },
+  {
+    key: "risograph_print",
+    label: "Riso Print",
+    bestFor: "independent brands, events, publishing, culture",
+    rules: [
+      "two or three flat spot inks with visible misregistration",
+      "coarse halftone dots and paper showing through",
+      "bold simple shapes rather than photographic detail",
+    ],
+  },
+  {
+    key: "brutalist_type",
+    label: "Brutalist",
+    bestFor: "fashion, music, provocative or contrarian positioning",
+    rules: [
+      "raw, oversized, deliberately unrefined typography as the artwork",
+      "hard edges, harsh contrast, no decoration whatsoever",
+      "one image element treated as a block, not as a photograph",
+    ],
+  },
+  {
+    key: "vintage_advert",
+    label: "Vintage Advert",
+    bestFor: "heritage brands, food, hospitality, nostalgia plays",
+    rules: [
+      "the layout language of a mid-century print advertisement",
+      "illustrated or photographed subject with generous framed margins",
+      "period composition executed with modern printing quality",
+    ],
+  },
 ] as const;
 
 export type CreativeDirection = (typeof CREATIVE_DIRECTIONS)[number];
@@ -166,17 +457,42 @@ export function directionByKey(key: string): CreativeDirection | undefined {
 /**
  * Directions that can show a supplied product photograph as itself.
  *
- * The other ten deliberately re-invent their subject — an abstract single-hue
- * crop, a line schematic, a neon grid, a chart. Handing one of those a real
- * photograph asks for two incompatible things and yields neither: the NuPhy
- * WH80 came back through `monochrome_crop` recoloured, its faceted edge
- * flattened, and its key legends invented. A Product ad that has a photo is
+ * The rest deliberately re-invent their subject — an abstract single-hue crop, a
+ * line schematic, a neon grid, a chart, a thing cut in half. Handing one of
+ * those a real photograph asks for two incompatible things and yields neither:
+ * the NuPhy WH80 came back through `monochrome_crop` recoloured, its faceted
+ * edge flattened, and its key legends invented. A Product ad that has a photo is
  * therefore steered here, where the reference is an asset rather than a
  * contradiction.
+ *
+ * Two of these for a long time, which meant every photographed article in the
+ * catalogue arrived as a studio hero or a Kinfolk table. The list is long now
+ * for that reason and no other: a real photograph deserved more than two ways
+ * of being looked at.
  */
 export const PHOTO_SAFE_DIRECTIONS = new Set<CreativeDirectionKey>([
   "product_hero",
   "editorial_spread",
+  "in_hand",
+  "unboxing",
+  "knolling",
+  "still_life_classical",
+  "levitation",
+  "splash_freeze",
+  "shadow_play",
+  "reflection_double",
+  "texture_wall",
+  "botanical_study",
+  "ingredient_deconstruction",
+  "street_documentary",
+  "interior_scene",
+  "workspace_scene",
+  "landscape_scale",
+  "night_city",
+  "liquid_suspension",
+  "smoke_atmosphere",
+  "kinetic_streak",
+  "scale_miniature",
 ]);
 
 export function isPhotoSafe(key: CreativeDirectionKey): boolean {
