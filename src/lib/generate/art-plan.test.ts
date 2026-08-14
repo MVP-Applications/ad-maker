@@ -38,6 +38,7 @@ const context = (extra: Partial<ArtContext> = {}): ArtContext => ({
   catalog: [],
   aspectRatio: "1:1",
   photographCapacity: 5,
+  avoid: [],
   ...extra,
 });
 
@@ -64,6 +65,7 @@ const plan = (extra: Partial<RawArtPlan> = {}): RawArtPlan => ({
   audienceNote: "Gift buyers.",
   heroProducts: [],
   supportingProducts: [],
+  articles: [],
   scene: "One bottle on a seamless backdrop, lit from the left.",
   buyerAskedForPeople: false,
   buyerAskedForPrice: false,

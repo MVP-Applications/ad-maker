@@ -55,6 +55,7 @@ const directs = (plan: Partial<RawArtPlan>) =>
         audienceNote: "",
         heroProducts: [],
         supportingProducts: [],
+        articles: [],
         scene: "",
         buyerAskedForPeople: false,
         buyerAskedForPrice: false,
@@ -260,7 +261,15 @@ describe("POST /api/compose", () => {
       expect(mocks.generateImage).toHaveBeenCalledTimes(1);
     });
 
+    /**
+     * The photograph is still fetched for a model that cannot be shown one,
+     * because the director looks at it either way — and a model working from
+     * words alone is exactly the one that most needs to be told the bottle is
+     * amber glass rather than left to guess from the palette.
+     */
     it("describes every Product when the model cannot be shown one", async () => {
+      mocks.fetchPublicRaster.mockImplementation(async () => photo(1));
+
       await post({
         model: "fal/xai/grok-imagine-image",
         products: [product("Bella Nera", "https://cdn.example/nera.png")],
@@ -268,7 +277,8 @@ describe("POST /api/compose", () => {
 
       const { text, images } = asked();
       expect(images).toEqual([]);
-      expect(mocks.fetchPublicRaster).not.toHaveBeenCalled();
+      // Looked at by the director, never attached to the image model.
+      expect(mocks.directArtwork.mock.calls[0][1]).toHaveLength(1);
       expect(text).toContain('"Bella Nera"');
       expect(text).toContain("no photograph supplied");
       expect(text).not.toContain("Photograph 1 is");
@@ -495,6 +505,77 @@ describe("POST /api/compose", () => {
       await post({ products: [product("Bella Nera", null)] });
 
       expect(asked().text).toContain('"SAR 450" — the price');
+    });
+
+    /**
+     * The director is shown the article before it decides anything, which is
+     * the whole fix for a bottle of amber glass coming back in brand teal.
+     */
+    it("shows the director the article before it decides", async () => {
+      mocks.fetchPublicRaster.mockImplementation(async () => photo(7));
+
+      await post({
+        products: [product("Bella Nera", "https://cdn.example/nera.png")],
+      });
+
+      const [, looked] = mocks.directArtwork.mock.calls[0];
+      expect(looked).toEqual([
+        { name: "Bella Nera", bytes: Uint8Array.from([7]), mediaType: undefined },
+      ]);
+    });
+
+    /** Nothing named means nothing chosen, so the head of the shop stands in. */
+    it("looks at the catalogue when the request named nothing", async () => {
+      mocks.fetchPublicRaster.mockImplementation(async () => photo(1));
+
+      await post({
+        prompt: "an ad for our bestsellers",
+        catalog: [
+          product("Oud Royal", "https://cdn.example/oud.png"),
+          product("Bella Nera", "https://cdn.example/nera.png"),
+        ],
+      });
+
+      const [, looked] = mocks.directArtwork.mock.calls[0];
+      expect(looked.map((a: { name: string }) => a.name)).toEqual([
+        "Oud Royal",
+        "Bella Nera",
+      ]);
+    });
+
+    /** One call per image and no memory between them is why it repeated. */
+    it("tells the director what this session already made", async () => {
+      await post({
+        avoid: [
+          { direction: "product_hero", lighting: "rembrandt", surface: "seamless_paper" },
+          { direction: "not a real one that survives", finish: "portra_warm" },
+        ],
+      });
+
+      const [context] = mocks.directArtwork.mock.calls[0];
+      expect(context.avoid).toEqual([
+        {
+          direction: "product_hero",
+          lighting: "rembrandt",
+          surface: "seamless_paper",
+          finish: null,
+        },
+        {
+          direction: "not a real one that survives",
+          lighting: null,
+          surface: null,
+          finish: "portra_warm",
+        },
+      ]);
+    });
+
+    it("hands the craft back so the next image can differ from this one", async () => {
+      directs({ direction: "levitation", lighting: "split_light", finish: "halation_bloom" });
+
+      const response = await post({});
+      expect(decodeURIComponent(response.headers.get("X-Ad-Craft") ?? "")).toBe(
+        "split_light||halation_bloom",
+      );
     });
 
     /** An agent that decides silently is one nobody can correct. */

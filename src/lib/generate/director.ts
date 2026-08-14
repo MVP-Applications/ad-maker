@@ -168,11 +168,56 @@ function buildPrompt(context: ArtContext): string {
     .join("\n\n");
 }
 
-function buildSystem(context: ArtContext): string {
+/**
+ * What the director is told when it can see the article.
+ *
+ * The failure this answers: a bottle of amber glass came back rendered in the
+ * brand's teal, because the only colour fact in the whole prompt was the brand
+ * palette and a model applies the palette it is given to the object it is given.
+ * The director could not have known better — it had a name and a catalogue
+ * sentence. Now it has the photograph, so it can.
+ */
+const SEEING = [
+  "YOU CAN SEE THE ARTICLES. Photographs of them are attached below.",
+  "Describe each one back in `articles`: its real colours, its materials, its finish, its form. Say what is actually there — 'amber glass with a brushed gold cap and a cream paper label', not 'a premium fragrance bottle'. That description becomes the fact the image model works from, so a vague one costs the article its likeness.",
+  "NEVER describe an article in the brand's palette. The brand's colours are the background, the light and the type. The article's colours are its own, and they are in the photograph.",
+  "CHOOSE THE PALETTE AND THE SURFACE TO SUIT THE ARTICLE YOU CAN SEE. A warm amber bottle on a cool slate ground with a raking light is art direction; the same bottle on the brand's own teal, because teal was in the brief, is a colour clash you were given every means to avoid.",
+] as const;
+
+/**
+ * Not a style rule — a session rule.
+ *
+ * One call per image, no memory between them, so the same request reasoned
+ * about twice produced the same picture twice. This is the only thing that
+ * makes the third press of the button different from the first.
+ */
+function avoidance(context: ArtContext): string {
+  if (context.avoid.length === 0) return "";
+
+  return [
+    "ALREADY MADE IN THIS SESSION — do not repeat these. Each new image must differ from every one below on the direction, and on at least two of lighting, surface and finish. The brand stays the same; the picture does not.",
+    ...context.avoid.map((prior, index) =>
+      `${index + 1}. direction ${prior.direction}${
+        [
+          prior.lighting ? `lighting ${prior.lighting}` : "",
+          prior.surface ? `surface ${prior.surface}` : "",
+          prior.finish ? `finish ${prior.finish}` : "",
+        ]
+          .filter(Boolean)
+          .map((part) => `, ${part}`)
+          .join("")
+      }`,
+    ),
+  ].join("\n");
+}
+
+function buildSystem(context: ArtContext, seen: readonly SeenArticle[]): string {
   return [
     "You are a world-class advertising art director and copywriter. You decide what an image will be, and an image model executes exactly what you decide — it has no judgement of its own, so anything you leave undecided it will resolve badly.",
     ["HOW TO THINK:", ...CRAFT].join("\n"),
     PRICE_DOCTRINE.join("\n"),
+    seen.length > 0 ? SEEING.join("\n") : "",
+    avoidance(context),
     [
       "THE TEXT LIST is the contract that matters most. `blocks` is the complete and exclusive list of strings that will exist in the picture. Anything you leave out cannot appear; anything you put in will appear exactly as you typed it, so type it exactly. Give every block its role, its cap height as a percentage of the image height, its weight, its case and its position — you are setting the type, not describing it. The headline is always the largest block.",
       "For a `price` block write nothing you invented: the real listed price is substituted from the catalogue, and a price block is dropped entirely unless the rules above allow one.",
@@ -194,22 +239,67 @@ function buildSystem(context: ArtContext): string {
     .join("\n\n");
 }
 
+/** One product photograph, and the article it shows. */
+export type SeenArticle = {
+  name: string;
+  bytes: Uint8Array;
+  mediaType: string;
+};
+
 export type ArtDirectorAdapter = (
   context: ArtContext,
+  /**
+   * The photographs, for the director to actually look at. Empty is normal —
+   * a shop may publish none — and the plan is simply made from words then.
+   */
+  seen: readonly SeenArticle[],
   signal?: AbortSignal,
 ) => Promise<ArtPlan>;
+
+/**
+ * The request, plus the articles as pictures.
+ *
+ * A text prompt and an image cannot travel in the same `prompt` field, so the
+ * whole brief becomes one user message with the photographs appended to it.
+ * Each is announced by name immediately before it appears, because a model
+ * shown three bottles and given three names in a list will pair them by order
+ * and be wrong the moment one of them fails to load.
+ */
+function buildMessages(context: ArtContext, seen: readonly SeenArticle[]) {
+  const parts: (
+    | { type: "text"; text: string }
+    | { type: "image"; image: Uint8Array; mediaType: string }
+  )[] = [{ type: "text", text: buildPrompt(context) }];
+
+  if (seen.length > 0) {
+    parts.push({
+      type: "text",
+      text: "THE ARTICLES THEMSELVES — look at each photograph. What you see is what the thing really is; the catalogue sentence is only what the shop wrote about it. Describe each one back in `articles`.",
+    });
+    for (const article of seen) {
+      parts.push({ type: "text", text: `This is "${article.name}":` });
+      parts.push({
+        type: "image",
+        image: article.bytes,
+        mediaType: article.mediaType,
+      });
+    }
+  }
+
+  return [{ role: "user" as const, content: parts }];
+}
 
 /**
  * Plan one image. Never throws: a director that cannot answer costs the image
  * its art direction, never the image itself.
  */
-export const directArtwork: ArtDirectorAdapter = async (context, signal) => {
+export const directArtwork: ArtDirectorAdapter = async (context, seen, signal) => {
   try {
     const { object } = await generateObject({
       model: gatewayTextModel(DIRECTOR_MODEL),
       schema: artPlanSchema,
-      system: buildSystem(context),
-      prompt: buildPrompt(context),
+      system: buildSystem(context, seen),
+      messages: buildMessages(context, seen),
       // No temperature: the director runs on a reasoning model, which rejects it.
       abortSignal: signal,
     });

@@ -36,14 +36,37 @@ const context = (extra: Partial<ArtContext> = {}): ArtContext => ({
   catalog: [],
   aspectRatio: "1:1",
   photographCapacity: 5,
+  avoid: [],
   ...extra,
 });
 
+type Part =
+  | { type: "text"; text: string }
+  | { type: "image"; image: Uint8Array; mediaType: string };
+
+/**
+ * The brief travels as one user message now, because a photograph cannot ride
+ * in the same field as a string. `prompt` is every text part of it joined back
+ * together; `images` is what the director was actually shown.
+ */
 const answered = () => {
   expect(mocks.generateObject).toHaveBeenCalledTimes(1);
   const call = mocks.generateObject.mock.calls[0][0];
-  return { system: call.system as string, prompt: call.prompt as string };
+  const parts = call.messages[0].content as Part[];
+  return {
+    system: call.system as string,
+    prompt: parts
+      .flatMap((part) => (part.type === "text" ? [part.text] : []))
+      .join("\n"),
+    images: parts.flatMap((part) => (part.type === "image" ? [part] : [])),
+  };
 };
+
+const seen = (name: string, byte: number) => ({
+  name,
+  bytes: Uint8Array.from([byte]),
+  mediaType: "image/png",
+});
 
 describe("the art director", () => {
   beforeEach(() => {
@@ -84,8 +107,7 @@ describe("the art director", () => {
 
   it("returns the plan, corrected by the rules it may not break", async () => {
     const plan = await directArtwork(
-      context({ catalog: [product("Oud Royal")] }),
-    );
+      context({ catalog: [product("Oud Royal")] }), []);
 
     expect(plan.adType).toBe("product_hero");
     expect(plan.heroProducts).toEqual(["Oud Royal"]);
@@ -93,7 +115,7 @@ describe("the art director", () => {
   });
 
   it("is told what a good advertisement is, and when a price belongs on one", async () => {
-    await directArtwork(context());
+    await directArtwork(context(), []);
 
     const { system } = answered();
     expect(system).toContain("PRICE IS A DECISION, AND THE DEFAULT IS NO.");
@@ -108,8 +130,7 @@ describe("the art director", () => {
       context({
         named: [product("Bella Nera", { imageUrl: "https://cdn.example/n.png" })],
         catalog: [product("Oud Royal", { price: null, currency: null })],
-      }),
-    );
+      }), []);
 
     const { prompt } = answered();
     expect(prompt).toContain("an ad for our bestsellers");
@@ -130,7 +151,7 @@ describe("the art director", () => {
    * paragraph each, and the prose is spliced in after the answer comes back.
    */
   it("is offered every craft axis by name, and charged for none of the prose", async () => {
-    await directArtwork(context());
+    await directArtwork(context(), []);
 
     const { prompt } = answered();
     expect(prompt).toContain("LIGHTING: rembrandt (Rembrandt key)");
@@ -143,7 +164,7 @@ describe("the art director", () => {
   });
 
   it("returns the craft it chose, ready to splice", async () => {
-    const plan = await directArtwork(context());
+    const plan = await directArtwork(context(), []);
 
     expect(plan.craft).toEqual({
       lighting: "split_light",
@@ -157,11 +178,122 @@ describe("the art director", () => {
 
   it("never shows the same Product twice when the buyer named it", async () => {
     await directArtwork(
-      context({ named: [product("Oud Royal")], catalog: [product("Oud Royal")] }),
-    );
+      context({ named: [product("Oud Royal")], catalog: [product("Oud Royal")] }), []);
 
     const { prompt } = answered();
     expect(prompt.match(/- "Oud Royal"/g)).toHaveLength(1);
+  });
+
+  /**
+   * The fix for a bottle of amber glass coming back in the brand's teal. The
+   * director could not have known better from a name and a catalogue sentence;
+   * now it is shown the article.
+   */
+  describe("looking at the article", () => {
+    it("is handed each photograph, announced by the name it belongs to", async () => {
+      await directArtwork(context(), [
+        seen("Bella Nera", 1),
+        seen("Oud Royal", 2),
+      ]);
+
+      const { system, prompt, images } = answered();
+      expect(images).toHaveLength(2);
+      expect(images[0].image).toEqual(Uint8Array.from([1]));
+      // Named immediately before its own picture, never paired by list order.
+      expect(prompt).toContain('This is "Bella Nera":');
+      expect(prompt).toContain('This is "Oud Royal":');
+      expect(system).toContain("YOU CAN SEE THE ARTICLES");
+      expect(system).toContain("NEVER describe an article in the brand's palette");
+    });
+
+    it("says none of that when the shop published no photograph", async () => {
+      await directArtwork(context(), []);
+
+      const { system, images } = answered();
+      expect(images).toEqual([]);
+      expect(system).not.toContain("YOU CAN SEE THE ARTICLES");
+    });
+
+    it("carries the appearance it read back into the plan", async () => {
+      mocks.generateObject.mockResolvedValue({
+        object: {
+          ...mocks.generateObject.mock.results,
+          adType: "product_hero",
+          direction: "product_hero",
+          lighting: null,
+          lens: null,
+          composition: null,
+          surface: null,
+          finish: null,
+          copyAngle: null,
+          rationale: "",
+          audienceNote: "",
+          heroProducts: ["Oud Royal"],
+          supportingProducts: [],
+          articles: [
+            {
+              name: "Oud Royal",
+              appearance: "amber glass with a brushed gold cap and a cream label",
+            },
+          ],
+          scene: "",
+          buyerAskedForPeople: false,
+          buyerAskedForPrice: false,
+          palette: { background: "slate", ink: "cream", accent: "gold" },
+          typeface: "Inter",
+          layout: "poster_stack",
+          blocks: [],
+        },
+      });
+
+      const plan = await directArtwork(
+        context({ named: [product("Oud Royal")] }),
+        [seen("Oud Royal", 1)],
+      );
+
+      expect(plan.articles).toEqual([
+        {
+          name: "Oud Royal",
+          appearance: "amber glass with a brushed gold cap and a cream label",
+        },
+      ]);
+    });
+  });
+
+  /**
+   * One call per image and no memory between them meant the same request
+   * reasoned about twice produced the same picture twice. The session is the
+   * only thing that can tell it otherwise.
+   */
+  describe("not repeating itself", () => {
+    it("is told what this session already made", async () => {
+      await directArtwork(
+        context({
+          avoid: [
+            {
+              direction: "product_hero",
+              lighting: "rembrandt",
+              surface: "seamless_paper",
+              finish: null,
+            },
+          ],
+        }),
+        [],
+      );
+
+      const { system } = answered();
+      expect(system).toContain("ALREADY MADE IN THIS SESSION");
+      expect(system).toContain(
+        "1. direction product_hero, lighting rembrandt, surface seamless_paper",
+      );
+      expect(system).toContain("differ from every one below on the direction");
+    });
+
+    it("says nothing about it on the first image of a session", async () => {
+      await directArtwork(context(), []);
+
+      expect(answered().system).not.toContain("ALREADY MADE IN THIS SESSION");
+    });
   });
 
   /** A director that cannot answer costs the image its art direction, not the image. */
@@ -169,8 +301,7 @@ describe("the art director", () => {
     mocks.generateObject.mockRejectedValue(new Error("gateway down"));
 
     const plan = await directArtwork(
-      context({ named: [product("Bella Nera")] }),
-    );
+      context({ named: [product("Bella Nera")] }), []);
 
     expect(plan.heroProducts).toEqual(["Bella Nera"]);
     expect(plan.rationale).toContain("art director was unavailable");
@@ -182,7 +313,7 @@ describe("the art director", () => {
     mocks.generateObject.mockRejectedValue(new Error("aborted"));
 
     await expect(
-      directArtwork(context(), controller.signal),
+      directArtwork(context(), [], controller.signal),
     ).rejects.toThrow("aborted");
   });
 });

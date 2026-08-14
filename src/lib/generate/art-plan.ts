@@ -305,6 +305,25 @@ export type ArtContext = {
   aspectRatio: AspectRatio;
   /** How many photographs this image model can actually be shown. */
   photographCapacity: number;
+  /**
+   * What this session has already made, most recent first.
+   *
+   * The composer runs one call per image with no memory of the last one, so the
+   * same request reasoned about twice produced the same picture twice — the
+   * director was not being lazy, it was being consistent, which is the same
+   * thing when a person presses the button three times hoping for options. This
+   * is the only thing in the context that is about the session rather than the
+   * shop.
+   */
+  avoid: readonly PriorChoice[];
+};
+
+/** One picture already made, reduced to the choices worth not repeating. */
+export type PriorChoice = {
+  direction: string;
+  lighting: string | null;
+  surface: string | null;
+  finish: string | null;
 };
 
 /**
@@ -322,10 +341,33 @@ export type CraftChoice = {
   copyAngle: string | null;
 };
 
+/**
+ * One article as the director SAW it.
+ *
+ * The director used to be handed a name and a catalogue sentence and asked to
+ * art-direct from that, which is asking someone to light a bottle they have
+ * never seen. It could not know the glass was amber, so it chose the brand's
+ * teal for the field and the image model — given a palette and no fact about
+ * the article — painted the bottle teal too.
+ *
+ * So the photograph goes to the director as well as to the image model, and
+ * this is what comes back: the article's real colours, materials and form, in
+ * the director's own words. It travels into the image prompt as fact, which
+ * means even a model that is never shown the photograph is told what the thing
+ * actually looks like.
+ */
+export type ArticleRead = {
+  /** The catalogue name this describes. Matched back, never trusted as new. */
+  name: string;
+  /** Colours, materials, finish and form, as seen. */
+  appearance: string;
+};
+
 export type ArtPlan = {
   adType: AdType;
   direction: CreativeDirectionKey;
   craft: CraftChoice;
+  articles: ArticleRead[];
   /** Why this direction, in the director's words. Shown, logged, never rendered. */
   rationale: string;
   /** Who this ad is talking to, as the director read it. Never rendered. */
@@ -393,6 +435,20 @@ export const artPlanSchema = z.object({
     .array(z.string())
     .describe(
       "exact catalogue names of the products this ad is about; empty for a company-level ad",
+    ),
+  articles: z
+    .array(
+      z.object({
+        name: z.string().describe("the exact catalogue name this describes"),
+        appearance: z
+          .string()
+          .describe(
+            "what the article actually looks like in its photograph: its real colours, materials, finish and form. Never the brand palette — the article's own.",
+          ),
+      }),
+    )
+    .describe(
+      "one entry for every product photograph you were shown, describing what you can see",
     ),
   supportingProducts: z
     .array(z.string())
@@ -613,10 +669,24 @@ export function enforceArtPlan(raw: RawArtPlan, context: ArtContext): ArtPlan {
       )
     : ranked;
 
+  /**
+   * Only for articles that are actually in the picture. A read of a product the
+   * director looked at and then chose not to advertise is a description of
+   * something absent, and stating what an absent thing looks like is how a
+   * second bottle ends up in frame.
+   */
+  const inPicture = [...heroes, ...supporting];
+  const articles = (raw.articles ?? []).flatMap((article) => {
+    const match = inPicture.find((product) => key(product.name) === key(article.name));
+    const appearance = trimTo(article.appearance ?? "", AD_RUN_LIMITS.productDescription);
+    return match && appearance ? [{ name: match.name, appearance }] : [];
+  });
+
   return {
     adType,
     direction,
     craft: chosenCraft(raw),
+    articles,
     rationale: trimTo(raw.rationale ?? "", 300),
     audienceNote: trimTo(raw.audienceNote ?? "", 300),
     heroProducts: heroes.map((product) => product.name),
@@ -670,6 +740,7 @@ export function fallbackArtPlan(context: ArtContext): ArtPlan {
     },
     typeface: context.fontFamily || "one clean geometric sans-serif",
     layout: "poster_stack",
+    articles: [],
     craft: {
       lighting: null,
       lens: null,
@@ -738,6 +809,17 @@ function contextBlock(
   described: readonly CatalogProduct[],
 ): string {
   const products = [...photographed, ...described];
+  /**
+   * What each article really looks like, said in the prompt rather than left to
+   * the model to guess. This is what stops a bottle being repainted in the
+   * brand's palette: a model given only a palette applies it to everything, and
+   * the only defence is a competing fact about the article itself.
+   */
+  const appearance = (product: CatalogProduct) => {
+    const read = plan.articles.find(({ name }) => key(name) === key(product.name));
+    return read ? ` Its real appearance: ${sentence(read.appearance)}` : "";
+  };
+
   return [
     `BACKGROUND — understand this, never render any of it as text:`,
     `Brand: ${context.brandName} (${context.domain})${context.industry ? `, ${context.industry}` : ""}.`,
@@ -755,14 +837,23 @@ function contextBlock(
       : "",
     ...photographed.map((product, index) => {
       const price = priceText(product);
-      return `  Photograph ${index + 1} is "${product.name}" — ${sentence(product.description)}${price ? ` Listed at ${price}.` : ""}`;
+      return `  Photograph ${index + 1} is "${product.name}" — ${sentence(product.description)}${appearance(product)}${price ? ` Listed at ${price}.` : ""}`;
     }),
     ...described.map((product) => {
       const price = priceText(product);
-      return `  "${product.name}" — ${sentence(product.description)}${price ? ` Listed at ${price}.` : ""} (no photograph supplied — build it from this description alone).`;
+      return `  "${product.name}" — ${sentence(product.description)}${appearance(product)}${price ? ` Listed at ${price}.` : ""} (no photograph supplied — build it from this description alone).`;
     }),
     products.length > 0
       ? `  Do not add a product that is not listed above, and do not invent names, brands or claims for them.`
+      : "",
+    /**
+     * The palette is stated a few lines below this, and a model handed a
+     * palette and an object applies one to the other. `fidelity.ts` says the
+     * same thing to a model holding a photograph; this says it to the ones that
+     * are only ever told about the article in words.
+     */
+    plan.articles.length > 0
+      ? `  Each article keeps its own real colours, materials and finish exactly as described above. The palette below governs the background, the lighting and the typography — never the article.`
       : "",
   ]
     .filter(Boolean)

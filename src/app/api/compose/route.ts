@@ -6,7 +6,9 @@ import {
   buildDirectedPrompt,
   resolveProducts,
   type ArtContext,
+  type ArtPlan,
   type CatalogProduct,
+  type PriorChoice,
 } from "@/lib/generate/art-plan";
 import { directArtwork } from "@/lib/generate/director";
 import {
@@ -29,7 +31,7 @@ import {
   isAspectRatio,
   shapeFor,
 } from "@/lib/generate/shape";
-import { fetchPublicRaster } from "@/lib/public-raster";
+import { fetchPublicRaster, type PublicRaster } from "@/lib/public-raster";
 import { parsePublicHttpUrl } from "@/lib/public-url";
 
 /**
@@ -131,47 +133,119 @@ function catalogProducts(value: unknown, limit: number): CatalogProduct[] {
     .slice(0, limit);
 }
 
+/** A Product and the picture of it, once the raster policy has passed it. */
+type Looked = { product: CatalogProduct; raster: PublicRaster };
+
 /**
- * The photographs, each still holding on to the Product it shows.
+ * How many articles the director may be shown.
  *
- * Naming a Product stops the model inventing its name; only the photograph stops
- * it inventing the article. Loaded through the same public-raster check the Ad
- * Run uses, and a photo that will not load costs its Product a likeness rather
- * than costing the image — which is exactly why the pairing is carried rather
- * than the position: the Products that drop out here are not the ones the prompt
- * would have counted past.
+ * Each one is a fetch on the way to an image somebody is watching a spinner
+ * for, and a director choosing between four photographs is not making a worse
+ * decision than one choosing between twelve.
  */
-async function loadPhotographs(
-  model: ImageModel,
+const DIRECTOR_EYES = 4;
+
+/**
+ * Fetch what the director is going to look at.
+ *
+ * The same public-raster check every other path uses: a URL the policy turns
+ * down costs its Product a likeness rather than costing the image.
+ */
+async function loadRasters(
   products: readonly CatalogProduct[],
   signal: AbortSignal,
-): Promise<Photographed[]> {
-  const capacity = photographCapacity(model);
-  if (capacity === 0) return [];
-
+): Promise<Looked[]> {
   const loaded = await Promise.all(
     products.map(async (product) => {
       if (!product.imageUrl) return null;
       try {
-        // Loaded even where only the URL is sent onward: this is the check that
-        // the address is a public, size-bounded raster, and it must run either
-        // way. Null for a URL the policy turned down, which costs the same as a
-        // throw here: a Product named in words but not shown.
         const raster = await fetchPublicRaster(product.imageUrl, signal);
-        return raster
-          ? { product, bytes: raster.bytes, url: product.imageUrl }
-          : null;
+        return raster ? { product, raster } : null;
       } catch {
         return null;
       }
     }),
   );
-
-  // Beyond what the model can be shown, a Product keeps its name and loses its
-  // likeness — which the prompt then says plainly rather than attaching a
-  // photograph the model was never going to look at.
-  return loaded.flatMap((entry) => (entry ? [entry] : [])).slice(0, capacity);
+  return loaded.flatMap((entry) => (entry ? [entry] : []));
 }
+
+/**
+ * The photographs, each still holding on to the Product it shows.
+ *
+ * Naming a Product stops the model inventing its name; only the photograph stops
+ * it inventing the article. The pairing is carried rather than the position: the
+ * Products that drop out here are not the ones the prompt would have counted
+ * past.
+ *
+ * Anything the director already looked at is reused rather than fetched twice —
+ * in the common case, where a person named the Products they wanted, that is
+ * every photograph in the picture.
+ */
+async function loadPhotographs(
+  model: ImageModel,
+  products: readonly CatalogProduct[],
+  already: readonly Looked[],
+  signal: AbortSignal,
+): Promise<Photographed[]> {
+  const capacity = photographCapacity(model);
+  if (capacity === 0) return [];
+
+  const missing = products.filter(
+    (product) => !already.some(({ product: seen }) => seen === product),
+  );
+  const loaded = [...already, ...(await loadRasters(missing, signal))];
+
+  // In the order the picture names them, which is the order the prompt counts.
+  return products
+    .flatMap((product) => {
+      const found = loaded.find(({ product: seen }) => seen === product);
+      return found?.product.imageUrl
+        ? [
+            {
+              product,
+              bytes: found.raster.bytes,
+              url: found.product.imageUrl,
+            },
+          ]
+        : [];
+    })
+    // Beyond what the model can be shown, a Product keeps its name and loses
+    // its likeness — which the prompt then says plainly rather than attaching a
+    // photograph the model was never going to look at.
+    .slice(0, capacity);
+}
+
+/** What this session has already made, as the browser reports it back. */
+function priorChoices(value: unknown): PriorChoice[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const raw = entry as Record<string, unknown>;
+      const direction = text(raw.direction, AD_RUN_LIMITS.directionKey);
+      if (!direction) return [];
+      const move = (key: unknown) => text(key, AD_RUN_LIMITS.directionKey) || null;
+      return [
+        {
+          direction,
+          lighting: move(raw.lighting),
+          surface: move(raw.surface),
+          finish: move(raw.finish),
+        },
+      ];
+    })
+    .slice(0, AVOID_MAX);
+}
+
+/**
+ * How far back the director remembers.
+ *
+ * Four is what a person has on screen and is still comparing. Beyond that the
+ * list starts forbidding good choices for the sake of a picture nobody is
+ * looking at any more.
+ */
+const AVOID_MAX = 4;
 
 /**
  * The director's reasoning, carried back beside the picture.
@@ -181,14 +255,20 @@ async function loadPhotographs(
  * shop is not latin-1, and a header that is not latin-1 throws rather than
  * degrades.
  */
-const directionHeaders = (input: {
-  adType: string;
-  direction: string;
-  rationale: string;
-}) => ({
-  "X-Ad-Type": encodeURIComponent(input.adType),
-  "X-Ad-Direction": encodeURIComponent(input.direction),
-  "X-Ad-Rationale": encodeURIComponent(input.rationale),
+const directionHeaders = (plan: ArtPlan) => ({
+  "X-Ad-Type": encodeURIComponent(plan.adType),
+  "X-Ad-Direction": encodeURIComponent(plan.direction),
+  "X-Ad-Rationale": encodeURIComponent(plan.rationale),
+  /**
+   * The craft, so the browser can hand it back on the next compose as something
+   * not to repeat. The route holds no session — this is how one image knows
+   * what the last four looked like.
+   */
+  "X-Ad-Craft": encodeURIComponent(
+    [plan.craft.lighting, plan.craft.surface, plan.craft.finish]
+      .map((key) => key ?? "")
+      .join("|"),
+  ),
 });
 
 export async function POST(req: Request) {
@@ -223,6 +303,7 @@ export async function POST(req: Request) {
   }
 
   const named = catalogProducts(body.products, MENTION_MAX);
+  const catalog = catalogProducts(body.catalog, CATALOG_MAX);
   const context: ArtContext = {
     request: prompt,
     brandName: text(body.brandName, AD_RUN_LIMITS.brandName) || "the brand",
@@ -236,14 +317,41 @@ export async function POST(req: Request) {
     audience: text(body.audience, AD_RUN_LIMITS.audience),
     language: text(body.language, AD_RUN_LIMITS.language),
     named,
-    catalog: catalogProducts(body.catalog, CATALOG_MAX),
+    catalog,
     aspectRatio: ratio,
     photographCapacity: Math.min(photographCapacity(model), MENTION_MAX),
+    avoid: priorChoices(body.avoid),
   };
+
+  /**
+   * The photographs load before the director rather than after, because the
+   * director needs to see them.
+   *
+   * It used to be handed a name and a catalogue sentence and asked to
+   * art-direct from that, which is asking someone to light a bottle they have
+   * never seen — so it chose the brand's palette, and the image model painted
+   * the bottle in it. Now the article is looked at first.
+   *
+   * Named Products are what a person chose, so those are what is shown. With
+   * nothing named the head of the catalogue stands in, bounded hard: this is a
+   * fetch per photograph on the way to an image somebody is waiting for.
+   */
+  const candidates = (named.length > 0 ? named : catalog.slice(0, DIRECTOR_EYES))
+    .filter((product) => product.imageUrl)
+    .slice(0, DIRECTOR_EYES);
+  const looked = await loadRasters(candidates, req.signal);
 
   let plan;
   try {
-    plan = await directArtwork(context, req.signal);
+    plan = await directArtwork(
+      context,
+      looked.map(({ product, raster }) => ({
+        name: product.name,
+        bytes: raster.bytes,
+        mediaType: raster.mediaType,
+      })),
+      req.signal,
+    );
   } catch {
     if (req.signal.aborted) return fail("Cancelled.", 499);
     return fail("That image failed to render. Try again.", 502);
@@ -252,15 +360,14 @@ export async function POST(req: Request) {
   /**
    * Which Products the picture actually holds is the director's answer, not the
    * request's: a person who named none may still get a range, and one who named
-   * three may be given a hero and two supporting articles. The photographs are
-   * loaded after that decision because the numbering in the prompt counts them.
+   * three may be given a hero and two supporting articles.
    */
   const subjects = resolveProducts(
     [...plan.heroProducts, ...plan.supportingProducts],
     context,
   ).slice(0, MENTION_MAX);
 
-  const photographs = await loadPhotographs(model, subjects, req.signal);
+  const photographs = await loadPhotographs(model, subjects, looked, req.signal);
   const shown = new Set(photographs.map(({ product }) => product));
 
   /**

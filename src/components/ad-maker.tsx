@@ -64,6 +64,7 @@ import {
   supportedRatios,
   type AspectRatio,
 } from "@/lib/generate/shape";
+import type { PriorChoice } from "@/lib/generate/art-plan";
 import type { AdMakerController, AdSlot } from "@/hooks/use-ad-maker";
 
 type IdleController = Extract<AdMakerController, { phase: "idle" }>;
@@ -1880,6 +1881,13 @@ function BrandDna({ s }: { s: DnaController }) {
  * make the run at all — so this screen states what the Ad Run would be rather
  * than asking anything. The selectors replace that statement.
  */
+/**
+ * How far back the director is asked to remember. Matches the route's own
+ * ceiling: beyond four, the list starts forbidding good choices for the sake of
+ * a picture nobody is looking at any more.
+ */
+const AVOID_MAX = 4;
+
 /** One image a person asked for by name, and how it is getting on. */
 type Composition = {
   id: number;
@@ -1894,13 +1902,22 @@ type Composition = {
    * learns to ask for the hero shot.
    */
   note?: string;
+  /**
+   * The choices this image was built from, kept so the next compose can be told
+   * not to repeat them. The route holds no session — the browser is the only
+   * thing that knows what the last four pictures were.
+   */
+  choice?: PriorChoice;
 };
 
 /**
- * The director's reasoning, as it travels: percent-encoded header values, since
- * a rationale written for an Arabic shop is not latin-1.
+ * What the director decided, as it travels back: percent-encoded header values,
+ * since a rationale written for an Arabic shop is not latin-1.
  */
-function directorNote(headers: Headers): string | undefined {
+function directorDecision(headers: Headers): {
+  note?: string;
+  choice?: PriorChoice;
+} {
   const read = (name: string) => {
     const raw = headers.get(name);
     if (!raw) return "";
@@ -1911,12 +1928,26 @@ function directorNote(headers: Headers): string | undefined {
     }
   };
 
-  const label = [read("X-Ad-Type"), read("X-Ad-Direction")]
+  const adType = read("X-Ad-Type");
+  const direction = read("X-Ad-Direction");
+  const label = [adType, direction]
     .filter(Boolean)
     .map((value) => value.replace(/_/g, " "))
     .join(" · ");
   const rationale = read("X-Ad-Rationale");
-  return [label, rationale].filter(Boolean).join(" — ") || undefined;
+  const [lighting, surface, finish] = read("X-Ad-Craft").split("|");
+
+  return {
+    note: [label, rationale].filter(Boolean).join(" — ") || undefined,
+    choice: direction
+      ? {
+          direction,
+          lighting: lighting || null,
+          surface: surface || null,
+          finish: finish || null,
+        }
+      : undefined,
+  };
 }
 
 function Studio({ s }: { s: StudioController }) {
@@ -1992,6 +2023,15 @@ function Studio({ s }: { s: StudioController }) {
           language: s.brief.languages[0] ?? "",
           products,
           catalog: s.products,
+          /**
+           * The last few pictures, so the director can be told not to make them
+           * again. Read from `made` at submit time rather than from a separate
+           * store: what is on screen is exactly what the person is comparing
+           * this next image against.
+           */
+          avoid: made
+            .flatMap((c) => (c.choice ? [c.choice] : []))
+            .slice(0, AVOID_MAX),
         }),
       });
 
@@ -2011,10 +2051,12 @@ function Studio({ s }: { s: StudioController }) {
         return;
       }
 
-      const note = directorNote(response.headers);
+      const { note, choice } = directorDecision(response.headers);
       const url = URL.createObjectURL(await response.blob());
       setMade((was) =>
-        was.map((c) => (c.id === id ? { ...c, status: "done", url, note } : c)),
+        was.map((c) =>
+          c.id === id ? { ...c, status: "done", url, note, choice } : c,
+        ),
       );
     } catch {
       setMade((was) =>
