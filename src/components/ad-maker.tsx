@@ -2410,6 +2410,36 @@ function BrandBar({
 }
 
 /**
+ * How far the prompt box may grow before it scrolls instead. Past this it
+ * starts eating the sheet it is sat over, which is the thing being described.
+ */
+const COMPOSER_MAX_LINES = 6;
+
+/** Should the box's own line height ever fail to resolve to a number. */
+const COMPOSER_FALLBACK_HEIGHT = 130;
+
+/**
+ * Sets the prompt box to the height of its own text, up to the cap.
+ *
+ * The cap is measured off the box rather than written down as a pixel count,
+ * so it lands on a whole line: a hard number left a sliver of the next line
+ * showing under the fold, which reads as a clipped box rather than a full one.
+ */
+function fitComposer(element: HTMLTextAreaElement) {
+  const style = getComputedStyle(element);
+  const line = parseFloat(style.lineHeight);
+  const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+  const cap = Number.isFinite(line)
+    ? line * COMPOSER_MAX_LINES + padding
+    : COMPOSER_FALLBACK_HEIGHT;
+
+  // Measured from nothing each time: scrollHeight never reports less than the
+  // height already set, so a prompt that shrank could not get the room back.
+  element.style.height = "auto";
+  element.style.height = `${Math.min(element.scrollHeight, cap)}px`;
+}
+
+/**
  * The composer, sat over the sheet rather than above it.
  *
  * Only what is wired is shown as working: Generate re-runs the ads, and the
@@ -2454,6 +2484,13 @@ function Composer({
 
   const matches = mention ? matchProducts(products, mention.query) : [];
   const open = mention !== null && matches.length > 0;
+
+  // The change handler fits the box as it is typed into, but the prompt is
+  // also rewritten from outside it — cleared by a generate, extended by a
+  // product name — and those have to give the box its height back too.
+  useEffect(() => {
+    if (box.current) fitComposer(box.current);
+  }, [prompt]);
 
   // Only what this model can actually render: the rest come back as its own
   // default shape without saying they have.
@@ -2517,7 +2554,7 @@ function Composer({
             <p className="border-b border-white/[0.1] px-3 py-1.5 text-[10px] uppercase tracking-[0.13em] text-[#6f6f78]">
               {mention?.query ? `Products matching “${mention.query}”` : "Your products"}
             </p>
-            <ul className="max-h-64 overflow-y-auto py-1">
+            <ul className="studio-scroll max-h-64 overflow-y-auto py-1">
               {matches.map((product, index) => (
                 <li key={product.name}>
                   <button
@@ -2577,6 +2614,10 @@ function Composer({
               rows={1}
               value={prompt}
               onChange={(e) => {
+                // Fitted here as well as in the effect: the element already
+                // holds the new text, so it resizes in the same frame the
+                // character lands rather than a paint later.
+                fitComposer(e.currentTarget);
                 setPrompt(e.target.value);
                 syncMention(e.currentTarget);
               }}
@@ -2585,7 +2626,7 @@ function Composer({
               onBlur={() => setMention(null)}
               onKeyDown={onKeyDown}
               placeholder="Describe the image you want to create…  type @ to name a product"
-              className="max-h-28 min-h-[28px] flex-1 resize-none bg-transparent py-1 text-[13.5px] text-[#f4f2ef] outline-none placeholder:text-[#6f6f78]"
+              className="studio-scroll min-h-[28px] flex-1 resize-none overflow-y-auto bg-transparent py-1 pr-1.5 text-[13.5px] text-[#f4f2ef] outline-none placeholder:text-[#6f6f78]"
             />
           </div>
 
