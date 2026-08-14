@@ -87,6 +87,66 @@
   .studio-hairline {
     border-color: rgb(255 255 255 / 0.14);
   }
+  /* The rail's travel.
+     Named properties rather than `all`: `all` animates every property that
+     happens to differ, which on this element means paint work nobody asked
+     for on each of the sixty frames. `will-change` warns the compositor a
+     frame early, and the easing is a decelerate curve — it leaves quickly and
+     settles slowly, which is what reads as weight rather than as lag. */
+  .rail-slide {
+    transition-property: margin-left, max-height;
+    transition-duration: 420ms;
+    transition-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+    will-change: margin-left;
+  }
+  /* Keeps the gallery's reflow to itself while the rail moves beside it. */
+  .rail-neighbour {
+    contain: layout paint;
+  }
+  /* A scrollbar that stays out of the way.
+     The platform's own overlay bar arrives light enough to read as a white
+     stripe against these panels, and thickens under the pointer — which puts
+     the brightest thing on screen next to the quietest list on it. This one
+     is a thin, dim thumb that does not change when it is pointed at, so the
+     panel looks the same whether or not a mouse happens to be over it. */
+  /* Deliberately no `scrollbar-width`/`scrollbar-color` here: setting either
+     switches Chrome to the standard scrollbar and makes it ignore every
+     ::-webkit-scrollbar rule below, which is what stopped the reveal from
+     working at all. Firefox has no equivalent of these pseudo-elements, so it
+     is handed the standard properties on its own further down.
+
+     The gutter is always reserved, so the list does not shift by the bar's
+     width the moment a pointer arrives over it. */
+  .studio-scroll::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .studio-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  /* Always drawn, and the same in every state.
+     Revealing it on hover is not achievable here: Chrome resolves scrollbar
+     pseudo-element styles once and does not re-evaluate them when an
+     ancestor's :hover changes, so a transparent-until-hovered thumb is simply
+     a missing thumb. A dim one that never moves is the honest version — and
+     holding :hover and :active to the same value is what keeps the platform
+     from brightening it to white under the pointer. */
+  .studio-scroll::-webkit-scrollbar-thumb,
+  .studio-scroll::-webkit-scrollbar-thumb:hover,
+  .studio-scroll::-webkit-scrollbar-thumb:active {
+    background-color: rgb(255 255 255 / 0.18);
+    border-radius: 9999px;
+  }
+  .studio-scroll::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  /* Firefox, which has no ::-webkit-scrollbar to style. */
+  @supports not selector(::-webkit-scrollbar) {
+    .studio-scroll {
+      scrollbar-width: thin;
+      scrollbar-color: rgb(255 255 255 / 0.18) transparent;
+    }
+  }
   .logo-edge {
     filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.85))
       drop-shadow(0 0 2px rgba(0, 0, 0, 0.5))
