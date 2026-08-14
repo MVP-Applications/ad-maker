@@ -59,4 +59,20 @@ export const AD_RUN_LIMITS = {
   scene: 900,
   language: 16,
   languages: 12,
+  /**
+   * The market read: what the brand sells, and who it sells to.
+   *
+   * `audience` is a sentence the extractor's model writes rather than a label
+   * the site states, so it is given room to be a sentence. The traits are the
+   * same read said as tags, and eight is what the card can show before the
+   * count takes over.
+   */
+  sector: 80,
+  niche: 120,
+  audience: 400,
+  audienceTrait: 60,
+  audienceTraits: 8,
+  /** The products the read was inferred from, as the extractor lists them. */
+  marketEvidence: 300,
+  marketSource: 60,
 } as const;

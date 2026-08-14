@@ -38,6 +38,32 @@ export {
 
 export type { BrandColor } from "@/lib/brand-color";
 
+/**
+ * What the brand sells and who it sells to, as the extractor reads it.
+ *
+ * Inferred rather than scraped — every other field on the Brief is something
+ * the site states about itself, and this one is a model's answer about it. It
+ * carries its own `confidence` and `source` for that reason, and it does not
+ * reach an ad: it is shown so the read can be checked and corrected, not so it
+ * can be rendered. Nothing here is written into a prompt or a canonical URL.
+ */
+export type MarketRead = {
+  /** The broad category, e.g. "computer accessories". */
+  sector: string;
+  /** The narrower one within it, e.g. "mechanical keyboards". */
+  niche: string;
+  /** Who buys, written as a sentence. */
+  audience: string;
+  /** The same read said as tags, for the places a sentence will not fit. */
+  audienceTraits: string[];
+  /** The products the read was inferred from, in the extractor's words. */
+  evidence: string;
+  /** 0..1, as the extractor scores its own answer. Null when it did not. */
+  confidence: number | null;
+  /** Which of the extractor's steps answered, e.g. "ai-identity". */
+  source: string;
+};
+
 export type AdBrief = {
   domain: string;
   brandName: string;
@@ -55,6 +81,8 @@ export type AdBrief = {
   /** BCP-47-ish tags the site publishes itself in, first one first. */
   languages: string[];
   colors: BrandColor[];
+  /** Null when the extractor read no market at all, which is allowed. */
+  market: MarketRead | null;
 };
 
 /**
@@ -164,7 +192,11 @@ type RecordValue = Record<string, unknown>;
 
 const DIRECTIONS = new Set<string>(CREATIVE_DIRECTION_KEYS);
 const MODELS = new Set<string>(IMAGE_MODEL_IDS);
-const BRIEF_FORMAT_VERSION = "5";
+// 6 adds the market read. Briefs cached at 5 decode without it — decodeMarket
+// tolerates the absence — but they were extracted before the extractor
+// reported one, so the version is bumped to fetch it rather than serve an
+// hour of Briefs whose Market card is empty for no reason the person can see.
+const BRIEF_FORMAT_VERSION = "6";
 
 function invalid(message: string): never {
   throw new Error(`Invalid Ad Run contract: ${message}`);
@@ -219,6 +251,65 @@ function promptFontFamily(value: unknown, name: string): string {
   return family;
 }
 
+/**
+ * The market read, or nothing.
+ *
+ * Absent and null both decode to null on purpose: Briefs cached before this
+ * field existed carry neither, and a stale entry in the CDN should degrade to
+ * a Brief without a market rather than fail the run it is serving.
+ */
+function decodeMarket(value: unknown): MarketRead | null {
+  if (value === null || value === undefined) return null;
+  const market = record(value, "brief.market");
+  onlyKeys(
+    market,
+    ["sector", "niche", "audience", "audienceTraits", "evidence", "confidence", "source"],
+    "brief.market",
+  );
+
+  if (
+    !Array.isArray(market.audienceTraits) ||
+    market.audienceTraits.length > AD_RUN_LIMITS.audienceTraits
+  ) {
+    invalid(
+      `brief.market.audienceTraits must contain at most ${AD_RUN_LIMITS.audienceTraits} traits`,
+    );
+  }
+
+  // A score outside 0..1 is not a low confidence, it is a field that does not
+  // mean what it is being read as — so it is dropped rather than clamped.
+  const confidence = market.confidence;
+  if (
+    confidence !== null &&
+    (typeof confidence !== "number" ||
+      !Number.isFinite(confidence) ||
+      confidence < 0 ||
+      confidence > 1)
+  ) {
+    invalid("brief.market.confidence must be null or a number between 0 and 1");
+  }
+
+  return {
+    sector: text(market.sector, "brief.market.sector", { max: AD_RUN_LIMITS.sector }),
+    niche: text(market.niche, "brief.market.niche", { max: AD_RUN_LIMITS.niche }),
+    audience: text(market.audience, "brief.market.audience", {
+      max: AD_RUN_LIMITS.audience,
+    }),
+    audienceTraits: market.audienceTraits.map((trait, index) =>
+      text(trait, `brief.market.audienceTraits[${index}]`, {
+        max: AD_RUN_LIMITS.audienceTrait,
+      }),
+    ),
+    evidence: text(market.evidence, "brief.market.evidence", {
+      max: AD_RUN_LIMITS.marketEvidence,
+    }),
+    confidence,
+    source: text(market.source, "brief.market.source", {
+      max: AD_RUN_LIMITS.marketSource,
+    }),
+  };
+}
+
 function decodeColor(value: unknown, index: number): BrandColor {
   const color = record(value, `colors[${index}]`);
   onlyKeys(color, ["hex", "name"], `colors[${index}]`);
@@ -251,6 +342,7 @@ function decodeBrief(value: unknown): AdBrief {
       "heroImageUrl",
       "languages",
       "colors",
+      "market",
     ],
     "brief",
   );
@@ -314,6 +406,7 @@ function decodeBrief(value: unknown): AdBrief {
       }),
     ),
     colors: brief.colors.map(decodeColor),
+    market: decodeMarket(brief.market),
   };
 }
 

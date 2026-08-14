@@ -28,6 +28,7 @@ const brief: AdBrief = {
   heroImageUrl: null,
   languages: ["en"],
   colors: [{ hex: "#635bff", name: "Purple" }],
+  market: null,
 };
 
 const PRODUCTS: readonly Product[] = [

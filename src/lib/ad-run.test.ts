@@ -30,6 +30,7 @@ const brief: AdBrief = {
   heroImageUrl: null,
   languages: ["en"],
   colors: [{ hex: "#635bff", name: "Purple" }],
+  market: null,
 };
 
 const products = [
@@ -204,6 +205,69 @@ test.each([
   ],
 ])("rejects a Brief with %s", (_label, build) => {
   expect(() => decodeAdRunBrief(build())).toThrow();
+});
+
+const MARKET = {
+  sector: "computer accessories",
+  niche: "mechanical keyboards",
+  audience: "Gamers and programmers, mainly adults.",
+  audienceTraits: ["adult gamers", "programmers"],
+  evidence: "Beat Boy, NuPhy Gem80",
+  confidence: 0.94,
+  source: "ai-identity",
+};
+
+const briefWithMarket = (market: unknown) => {
+  const candidate = adRunBrief(1);
+  Object.assign(candidate.brief, { market });
+  return candidate;
+};
+
+test("carries the market read through the Brief", () => {
+  expect(decodeAdRunBrief(briefWithMarket(MARKET)).brief.market).toEqual(MARKET);
+});
+
+// A Brief cached before the extractor reported a market has neither key, and a
+// stale CDN entry should degrade to a Brief without one rather than fail the
+// run it is serving.
+test.each([["absent", undefined], ["null", null]])(
+  "decodes a Brief whose market is %s",
+  (_label, market) => {
+    expect(decodeAdRunBrief(briefWithMarket(market)).brief.market).toBeNull();
+  },
+);
+
+test.each([
+  ["an unknown field", { ...MARKET, competitors: ["Razer"] }],
+  ["more traits than the ceiling", {
+    ...MARKET,
+    audienceTraits: Array.from({ length: AD_RUN_LIMITS.audienceTraits + 1 }, (_, i) => `t${i}`),
+  }],
+  ["a trait past its bound", {
+    ...MARKET,
+    audienceTraits: ["t".repeat(AD_RUN_LIMITS.audienceTrait + 1)],
+  }],
+  ["an audience past its bound", { ...MARKET, audience: "a".repeat(AD_RUN_LIMITS.audience + 1) }],
+  // Outside 0..1 is not a low score, it is a field that does not mean what it
+  // is being read as.
+  ["a confidence above one", { ...MARKET, confidence: 1.5 }],
+  ["a negative confidence", { ...MARKET, confidence: -0.1 }],
+  ["a confidence that is not a number", { ...MARKET, confidence: "0.94" }],
+  ["traits that are not an array", { ...MARKET, audienceTraits: "adult gamers" }],
+])("rejects a Brief with market carrying %s", (_label, market) => {
+  expect(() => decodeAdRunBrief(briefWithMarket(market))).toThrow();
+});
+
+// The market read is shown so it can be checked, never rendered. Letting it
+// reach the canonical URL would put a model's guess about who buys into the
+// CDN key of every ad.
+test("never carries the market read into a rendered ad's canonical URL", () => {
+  const decoded = decodeAdRunBrief(briefWithMarket(MARKET));
+  const href = renderedAdHref(decoded.brief, concepts[0]);
+
+  expect(href).not.toContain("market");
+  expect(href).not.toContain("gamers");
+  expect(href).not.toContain("ai-identity");
 });
 
 // The request is the one field a person types, and the ad URL is the only
@@ -452,7 +516,7 @@ test("rejects malformed non-subject Ad Run invariants", () => {
 
 test("builds the versioned canonical Brief href", () => {
   expect(briefHref("https://www.stripe.com/pricing")).toBe(
-    "/api/brief?domain=stripe.com&v=5",
+    "/api/brief?domain=stripe.com&v=6",
   );
 });
 

@@ -94,6 +94,7 @@ function planFor(
       heroImageUrl: null,
       languages: ["en"],
       colors: [{ hex: "#635bff", name: "Purple" }],
+      market: null,
     },
     concepts,
   };
@@ -209,7 +210,7 @@ describe("useAdMaker", () => {
     await startAndGenerate(result, "HTTPS://WWW.Stripe.COM/Pricing");
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "/api/brief?domain=stripe.com&v=5",
+      "/api/brief?domain=stripe.com&v=6",
     );
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/concepts");
     const generating = atPhase(result.current, "generating");
@@ -237,7 +238,7 @@ describe("useAdMaker", () => {
     expect(catalog.selectedCount).toBe(catalog.products.length);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "/api/brief?domain=stripe.com&v=5",
+      "/api/brief?domain=stripe.com&v=6",
     );
 
     act(() => catalog.confirmSelection());

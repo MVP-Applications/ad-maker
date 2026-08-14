@@ -27,6 +27,7 @@ const brief: AdRunBrief["brief"] = {
   heroImageUrl: null,
   languages: ["en"],
   colors: [{ hex: "#635bff", name: "Purple" }],
+  market: null,
 };
 
 const adRunBrief: AdRunBrief = {

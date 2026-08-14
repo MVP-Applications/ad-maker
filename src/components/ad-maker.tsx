@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   ArrowRightIcon,
   BoltIcon,
   CheckIcon,
+  ChevronDown,
   CloseIcon,
   DownloadIcon,
   GlobeIcon,
@@ -23,6 +24,7 @@ import {
   AD_RUN_MIN_SIZE,
   productKey,
   type AdBrief,
+  type MarketRead,
   type Product,
 } from "@/lib/ad-run";
 import {
@@ -1215,6 +1217,224 @@ function Thumbnails({
   );
 }
 
+/** One trait, sized to sit in a row of them without becoming the loudest thing. */
+function TraitChip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="truncate rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground ring-1 ring-border">
+      {children}
+    </span>
+  );
+}
+
+/**
+ * One named line of the market read.
+ *
+ * Every other card on this page is a single field and says what it is in the
+ * label along its bottom edge. This one carries four, so each says its own
+ * name — otherwise "computer peripherals" above "mechanical keyboards" is two
+ * anonymous phrases, and which is the sector is anyone's guess until the sheet
+ * is opened. The names match the sheet's, so opening it holds still.
+ */
+function MarketField({
+  label,
+  children,
+  className = "",
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`min-w-0 py-2.5 first:pt-0 ${className}`}>
+      <p className="text-[9.5px] font-medium uppercase tracking-[0.11em] text-muted-foreground/60">
+        {label}
+      </p>
+      <div className="mt-1.5">{children}</div>
+    </div>
+  );
+}
+
+/** What the extract left blank, said as such rather than left as a gap. */
+function NotStated() {
+  return <p className="text-[12.5px] text-muted-foreground/50">Not stated</p>;
+}
+
+/**
+ * The market read, standing up in a column.
+ *
+ * What the shop sells, then who buys it, read top to bottom in the order the
+ * sheet edits them. Only the four fields that say something about the brand:
+ * `evidence`, `confidence` and `source` record how the extract arrived at
+ * this, which is a question about the extractor rather than about the brand
+ * being checked.
+ */
+function MarketSummary({ market }: { market: MarketRead | null }) {
+  if (!market) {
+    return (
+      <p className="text-[12px] text-muted-foreground">
+        Not read — the extract did not say what this shop sells or who buys it.
+      </p>
+    );
+  }
+
+  return (
+    // Divided and spread: four fields in one card need a line between them to
+    // read as four, and a column this tall has room left over — dealt evenly
+    // into the gaps it reads as a list, banked at the bottom it reads as one
+    // field that failed to load. A long read has no slack to spread and simply
+    // stacks from the top.
+    <div className="flex h-full min-h-0 flex-col justify-between divide-y divide-border overflow-hidden">
+      <MarketField label="Sector">
+        {/* pr-7 on this line alone: the pencil sits in this corner, and
+            padding the whole column would narrow every line under it to clear
+            something only the first one reaches. */}
+        {market.sector ? (
+          <p className="pr-7 text-[12.5px] leading-snug text-foreground">
+            {market.sector}
+          </p>
+        ) : (
+          <NotStated />
+        )}
+      </MarketField>
+
+      <MarketField label="Niche">
+        {market.niche ? (
+          <p className="text-[12.5px] leading-snug text-foreground">
+            {market.niche}
+          </p>
+        ) : (
+          <NotStated />
+        )}
+      </MarketField>
+
+      <MarketField label="Audience" className="min-h-0 overflow-hidden">
+        {market.audience ? (
+          <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+            {market.audience}
+          </p>
+        ) : (
+          <NotStated />
+        )}
+      </MarketField>
+
+      {market.audienceTraits.length > 0 && (
+        <MarketField label="Audience traits">
+          {/* All of them, not the first few: the column is tall enough to wrap
+              eight tags, and a count is only worth showing where they cannot. */}
+          <div className="flex flex-wrap gap-1">
+            {market.audienceTraits.map((trait) => (
+              <TraitChip key={trait}>{trait}</TraitChip>
+            ))}
+          </div>
+        </MarketField>
+      )}
+    </div>
+  );
+}
+
+/** A market read with nothing in it, for a brand the extract said nothing about. */
+const EMPTY_MARKET: MarketRead = {
+  sector: "",
+  niche: "",
+  audience: "",
+  audienceTraits: [],
+  evidence: "",
+  confidence: null,
+  source: "",
+};
+
+/**
+ * Correcting what the extract inferred.
+ *
+ * The same four fields the card shows. `evidence`, `confidence` and `source`
+ * ride along on the Brief and are not offered here: they record how the
+ * extractor arrived at the read, and a person rewriting the audience does not
+ * change which products it was inferred from or how sure the model was.
+ */
+function MarketEditor({
+  market,
+  onChange,
+  /** Only where this is the whole sheet: in the studio's it sits last, and a
+      field that grabs focus there scrolls the brand's name out of view. */
+  autoFocus = false,
+}: {
+  market: MarketRead | null;
+  onChange: (next: MarketRead | null) => void;
+  autoFocus?: boolean;
+}) {
+  const value = market ?? EMPTY_MARKET;
+
+  const edit = (patch: Partial<MarketRead>) => {
+    const next = { ...value, ...patch };
+    // Emptying all three is "no market read", not a read that says nothing —
+    // the same test context.ts applies to the extract on the way in.
+    const stated = next.sector.trim() || next.niche.trim() || next.audience.trim();
+    onChange(stated ? next : null);
+  };
+
+  return (
+    <>
+      <Field label="Sector" hint="The broad category, e.g. computer accessories.">
+        <input
+          type="text"
+          autoFocus={autoFocus}
+          value={value.sector}
+          maxLength={AD_RUN_LIMITS.sector}
+          placeholder="Not stated"
+          onChange={(e) => edit({ sector: e.target.value })}
+          className="input"
+        />
+      </Field>
+
+      <Field label="Niche" hint="The narrower one within it, e.g. mechanical keyboards.">
+        <input
+          type="text"
+          value={value.niche}
+          maxLength={AD_RUN_LIMITS.niche}
+          placeholder="Not stated"
+          onChange={(e) => edit({ niche: e.target.value })}
+          className="input"
+        />
+      </Field>
+
+      <Field label="Audience" hint="Who buys, in a sentence.">
+        <textarea
+          rows={3}
+          value={value.audience}
+          maxLength={AD_RUN_LIMITS.audience}
+          placeholder="Not stated"
+          onChange={(e) => edit({ audience: e.target.value })}
+          className="input resize-none"
+        />
+      </Field>
+
+      <Field
+        label="Audience traits"
+        hint={`The same read as tags, separated by commas. At most ${AD_RUN_LIMITS.audienceTraits}.`}
+      >
+        <input
+          type="text"
+          // Split on the way out and joined on the way in, rather than held as
+          // a parsed list: splitting per keystroke eats the comma the moment
+          // it is typed, before the next trait has been started.
+          value={value.audienceTraits.join(", ")}
+          placeholder="adult gamers, programmers"
+          onChange={(e) =>
+            edit({
+              audienceTraits: e.target.value
+                .split(",")
+                .map((trait) => trait.trim().slice(0, AD_RUN_LIMITS.audienceTrait))
+                .filter(Boolean)
+                .slice(0, AD_RUN_LIMITS.audienceTraits),
+            })
+          }
+          className="input"
+        />
+      </Field>
+    </>
+  );
+}
+
 /** Which card's sheet is open. */
 type DnaField =
   | "logo"
@@ -1224,7 +1444,8 @@ type DnaField =
   | "colours"
   | "headline"
   | "products"
-  | "images";
+  | "images"
+  | "market";
 
 const SHEET_COPY: Record<DnaField, { title: string; hint: string }> = {
   logo: { title: "Logo", hint: "The image handed to models that accept one." },
@@ -1240,6 +1461,10 @@ const SHEET_COPY: Record<DnaField, { title: string; hint: string }> = {
   images: {
     title: "Images",
     hint: "Every photograph the extract carries, hero shot first.",
+  },
+  market: {
+    title: "Market",
+    hint: "What the shop sells and who buys it. Inferred, not stated — so this is the field most worth reading twice.",
   },
 };
 
@@ -1288,9 +1513,21 @@ function BrandDna({ s }: { s: DnaController }) {
         </p>
       </div>
 
-      {/* 4x4 exactly: every cell is spoken for, so the varied card sizes still
-          resolve into one rectangle instead of a ragged last row. */}
-      <div className="mt-3 grid min-h-0 flex-1 grid-cols-4 grid-rows-4 gap-2.5">
+      {/* 5x4 exactly: every cell is spoken for, so the varied card sizes still
+          resolve into one rectangle instead of a ragged last row.
+
+          Market is a column rather than a row. It is the only card carrying a
+          sentence and a row of tags at once, and a row gave it the page's full
+          width but a fifth of its height — which cut its own tags off, and
+          took the height out of every other card to do it. Standing it up on
+          the right gives the sentence somewhere to go, and hands the other
+          eight cards back the four rows they were drawn for.
+
+          Its column is wider than the other four. An even fifth is enough for
+          a swatch or a type name, and this card carries four labelled fields
+          and a paragraph — at that width the audience broke every three or
+          four words, which is what made a short sentence look like a wall. */}
+      <div className="mt-3 grid min-h-0 flex-1 grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.7fr)] grid-rows-4 gap-2.5">
         <DnaCard
           label="Logo"
           className="col-span-2 row-span-2"
@@ -1445,6 +1682,17 @@ function BrandDna({ s }: { s: DnaController }) {
         >
           <Thumbnails urls={s.images} total={s.images.length} alt="" />
         </DnaCard>
+
+        {/* Placed rather than flowed: an auto-placed row-span-4 would be dealt
+            whichever column the eight cards above happen to leave. */}
+        <DnaCard
+          label="Market"
+          className="col-start-5 row-start-1 row-span-4"
+          onEdit={() => open("market")}
+          editLabel="Edit the market read"
+        >
+          <MarketSummary market={b.market} />
+        </DnaCard>
       </div>
 
       {editing && (
@@ -1582,6 +1830,14 @@ function BrandDna({ s }: { s: DnaController }) {
 
           {editing === "images" && (
             <ImagesSheet images={s.images} heroImageUrl={b.heroImageUrl} />
+          )}
+
+          {editing === "market" && (
+            <MarketEditor
+              market={draft.market}
+              onChange={(market) => patch({ market })}
+              autoFocus
+            />
           )}
 
           {editing === "headline" && (
@@ -2061,6 +2317,43 @@ function BrandRail({
           </p>
         )}
 
+        {/* Who the ads are for, under the look they are made in. The niche
+            names the shop and the traits name its buyers; the audience
+            sentence is the tooltip, because this rail is a column and that
+            sentence is what turns it into a paragraph. */}
+        {b.market && (
+          <div className="space-y-1.5" title={b.market.audience || undefined}>
+            {(b.market.niche || b.market.sector) && (
+              <p className="truncate text-[11px] text-[#8b8b93]">
+                {b.market.niche || b.market.sector}
+                {b.market.niche && b.market.sector && (
+                  <span className="text-[#6f6f78]"> · {b.market.sector}</span>
+                )}
+              </p>
+            )}
+            {b.market.audienceTraits.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1">
+                {b.market.audienceTraits.slice(0, 3).map((trait) => (
+                  <span
+                    key={trait}
+                    className="truncate rounded-[4px] bg-white/[0.06] px-1.5 py-0.5 text-[9.5px] text-[#8b8b93]"
+                  >
+                    {trait}
+                  </span>
+                ))}
+                {b.market.audienceTraits.length > 3 && (
+                  <span
+                    title={b.market.audienceTraits.slice(3).join(", ")}
+                    className="text-[10px] text-[#6f6f78]"
+                  >
+                    +{b.market.audienceTraits.length - 3}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center gap-1">
           {b.languages.slice(0, 3).map((tag) => (
             <span
@@ -2260,6 +2553,11 @@ function BrandSheet({
           />
         </Field>
 
+        <MarketEditor
+          market={draft.market}
+          onChange={(market) => patch({ market })}
+        />
+
         <button
           type="button"
           onClick={onReset}
@@ -2415,6 +2713,36 @@ function BrandBar({
 }
 
 /**
+ * How far the prompt box may grow before it scrolls instead. Past this it
+ * starts eating the sheet it is sat over, which is the thing being described.
+ */
+const COMPOSER_MAX_LINES = 6;
+
+/** Should the box's own line height ever fail to resolve to a number. */
+const COMPOSER_FALLBACK_HEIGHT = 130;
+
+/**
+ * Sets the prompt box to the height of its own text, up to the cap.
+ *
+ * The cap is measured off the box rather than written down as a pixel count,
+ * so it lands on a whole line: a hard number left a sliver of the next line
+ * showing under the fold, which reads as a clipped box rather than a full one.
+ */
+function fitComposer(element: HTMLTextAreaElement) {
+  const style = getComputedStyle(element);
+  const line = parseFloat(style.lineHeight);
+  const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+  const cap = Number.isFinite(line)
+    ? line * COMPOSER_MAX_LINES + padding
+    : COMPOSER_FALLBACK_HEIGHT;
+
+  // Measured from nothing each time: scrollHeight never reports less than the
+  // height already set, so a prompt that shrank could not get the room back.
+  element.style.height = "auto";
+  element.style.height = `${Math.min(element.scrollHeight, cap)}px`;
+}
+
+/**
  * The composer, sat over the sheet rather than above it.
  *
  * Only what is wired is shown as working: Generate re-runs the ads, and the
@@ -2488,6 +2816,13 @@ function Composer({
   const matches = mention ? matchProducts(products, mention.query) : [];
   const open = mention !== null && matches.length > 0;
 
+  // The change handler fits the box as it is typed into, but the prompt is
+  // also rewritten from outside it — cleared by a generate, extended by a
+  // product name — and those have to give the box its height back too.
+  useEffect(() => {
+    if (box.current) fitComposer(box.current);
+  }, [prompt]);
+
   // Only what this model can actually render: the rest come back as its own
   // default shape without saying they have.
   const chosen = imageModelById(model);
@@ -2551,7 +2886,9 @@ function Composer({
             <p className="border-b border-white/[0.1] px-3 py-1.5 text-[10px] uppercase tracking-[0.13em] text-[#6f6f78]">
               {mention?.query ? `Products matching “${mention.query}”` : "Your products"}
             </p>
-            <ul className="max-h-64 overflow-y-auto py-1">
+            {/* Inset rows, for the same reason the Model and Ratio menus have
+                them: a full-width highlight cannot follow the panel's corner. */}
+            <ul className="studio-scroll max-h-64 overflow-y-auto p-1">
               {matches.map((product, index) => (
                 <li key={product.name}>
                   <button
@@ -2563,7 +2900,7 @@ function Composer({
                       choose(product);
                     }}
                     onMouseEnter={() => setHighlighted(index)}
-                    className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition ${
+                    className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition ${
                       index === highlighted ? "bg-white/[0.08]" : ""
                     }`}
                   >
@@ -2611,6 +2948,10 @@ function Composer({
               rows={1}
               value={prompt}
               onChange={(e) => {
+                // Fitted here as well as in the effect: the element already
+                // holds the new text, so it resizes in the same frame the
+                // character lands rather than a paint later.
+                fitComposer(e.currentTarget);
                 setPrompt(e.target.value);
                 syncMention(e.currentTarget);
               }}
@@ -2619,7 +2960,7 @@ function Composer({
               onBlur={() => setMention(null)}
               onKeyDown={onKeyDown}
               placeholder="Describe the image you want to create…  type @ to name a product"
-              className="max-h-28 min-h-[28px] flex-1 resize-none bg-transparent py-1 text-[13.5px] text-[#f4f2ef] outline-none placeholder:text-[#6f6f78]"
+              className="studio-scroll min-h-[28px] flex-1 resize-none overflow-y-auto bg-transparent py-1 pr-1.5 text-[13.5px] text-[#f4f2ef] outline-none placeholder:text-[#6f6f78]"
             />
           </div>
 
@@ -2663,6 +3004,20 @@ function Composer({
   );
 }
 
+/**
+ * The composer's own select.
+ *
+ * Not a native one. `<select>` hands its list to the platform's widget, which
+ * arrives as a white sheet in the system font at the system size, over the
+ * darkest panel on the page — and styling it is not on offer: `option`
+ * backgrounds are honoured by some browsers, ignored by others, and the menu
+ * itself is drawn outside the page entirely. So the one surface the composer
+ * opens over itself was the one surface the app had no say in.
+ *
+ * This is the listbox pattern rather than a div that happens to open: focus
+ * stays on the button and the keys land there, so the list needs no tab stop
+ * of its own and closing always returns the caret somewhere sensible.
+ */
 function ComposerSelect({
   label,
   value,
@@ -2674,21 +3029,145 @@ function ComposerSelect({
   onChange: (next: string) => void;
   options: readonly { value: string; label: string }[];
 }) {
+  const listId = useId();
+  const [open, setOpen] = useState(false);
+  const selected = Math.max(
+    options.findIndex((option) => option.value === value),
+    0,
+  );
+  /** Where the keys are, which is only the same as the choice until they move. */
+  const [active, setActive] = useState(selected);
+  const root = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+
+  const show = () => {
+    setActive(selected);
+    setOpen(true);
+  };
+  const choose = (index: number) => {
+    onChange(options[index].value);
+    setOpen(false);
+  };
+
+  // Pointer down rather than click: a menu that survives until the mouse comes
+  // back up stays open under whatever was just pressed somewhere else.
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [open]);
+
+  // The list is short enough to fit today and capped in case a model list is
+  // not, so the option the keys are on has to be able to bring itself in.
+  useEffect(() => {
+    if (!open) return;
+    list.current
+      ?.querySelector<HTMLElement>('[data-active="true"]')
+      ?.scrollIntoView({ block: "nearest" });
+  }, [open, active]);
+
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    const step = (by: number) => {
+      event.preventDefault();
+      if (!open) return show();
+      setActive((was) => (was + by + options.length) % options.length);
+    };
+
+    if (event.key === "ArrowDown") return step(1);
+    if (event.key === "ArrowUp") return step(-1);
+    if (event.key === "Home" && open) {
+      event.preventDefault();
+      return setActive(0);
+    }
+    if (event.key === "End" && open) {
+      event.preventDefault();
+      return setActive(options.length - 1);
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      return open ? choose(active) : show();
+    }
+    if (event.key === "Escape" && open) {
+      // Stopped here: the composer treats Escape as "close the @ list", and
+      // one key press should not dismiss two things at once.
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+    }
+    // Tab is left alone. Moving on closes the menu, which is what leaving means.
+    if (event.key === "Tab") setOpen(false);
+  };
+
   return (
-    <label className="hidden items-center gap-1 rounded-lg border border-white/[0.1] px-2 py-1 text-[11px] transition hover:border-white/20 sm:inline-flex">
-      <span className="text-[#6f6f78]">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="cursor-pointer bg-transparent text-[#c9c7c2] outline-none [&>option]:bg-[#151517]"
+    <div ref={root} className="relative hidden sm:block">
+      <button
+        type="button"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        aria-label={`${label} — ${options[selected]?.label ?? value}`}
+        onClick={() => (open ? setOpen(false) : show())}
+        onKeyDown={onKeyDown}
+        className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] transition focus:outline-none focus-visible:border-white/40 ${
+          open ? "border-white/25 bg-white/[0.05]" : "border-white/[0.1] hover:border-white/20"
+        }`}
       >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
+        <span className="text-[#6f6f78]">{label}</span>
+        <span className="text-[#c9c7c2]">{options[selected]?.label ?? value}</span>
+        <ChevronDown
+          className={`size-3 text-[#6f6f78] transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {open && (
+        // Upward: the composer sits on the bottom edge of the window, so a
+        // list that opened downward would open off the end of it.
+        <ul
+          ref={list}
+          id={listId}
+          role="listbox"
+          aria-label={label}
+          // p-1 with rounded rows inside, rather than a padded list of
+          // full-width ones: a highlight that runs to the panel's edge cannot
+          // follow its corner, so hovering the first or last option drew a
+          // straight line across a rounded end. Inset by the padding it never
+          // reaches the corner to fight with it. The row's radius is the
+          // panel's less that padding, so the two curves stay concentric.
+          className="studio-scroll absolute bottom-full left-0 z-30 mb-1.5 max-h-64 min-w-full origin-bottom animate-sheet-in overflow-y-auto rounded-[12px] border border-white/[0.14] bg-[#151517] p-1 shadow-[0_18px_50px_-24px_rgba(0,0,0,0.9)]"
+        >
+          {options.map((option, index) => (
+            <li key={option.value}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={index === selected}
+                data-active={index === active}
+                // Mouse down, not click: the button below must not take focus
+                // off the trigger before the choice is made against it.
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  choose(index);
+                }}
+                onMouseEnter={() => setActive(index)}
+                className={`flex w-full items-center gap-2 whitespace-nowrap rounded-lg px-2 py-1.5 text-left text-[12px] transition ${
+                  index === active ? "bg-white/[0.08]" : ""
+                } ${index === selected ? "text-[#f4f2ef]" : "text-[#c9c7c2]"}`}
+              >
+                {/* A reserved slot rather than a conditional icon, so the
+                    labels do not shift sideways as the choice moves. */}
+                <span className="grid w-3.5 shrink-0 place-items-center">
+                  {index === selected && <CheckIcon className="size-3" />}
+                </span>
+                {option.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

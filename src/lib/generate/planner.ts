@@ -6,6 +6,7 @@ import {
   type AdBrief,
   type AdRunBrief,
   type AdRunPlan,
+  type MarketRead,
   type PlannedConcept,
   type Product,
 } from "@/lib/ad-run";
@@ -142,6 +143,7 @@ function buildBrief(
   summary: string,
   languages: readonly string[],
   styleguide: StyleguideProfile,
+  market: MarketRead | null,
 ): AdBrief {
   const colors = boundedColors(styleguide.colors);
   const { a: colorA, b: colorB } = pickBrandColors(colors);
@@ -170,6 +172,10 @@ function buildBrief(
       })
       .slice(0, AD_RUN_LIMITS.languages),
     colors,
+    // Passed through as read. Every other field here is bounded on the way in
+    // because a prompt or a URL will carry it; this one is shown and nothing
+    // more, and context.ts has already bounded it for the Brief's own size.
+    market,
   };
 }
 
@@ -213,6 +219,7 @@ export function createBriefResearcher(
         research.summary,
         research.languages,
         research.styleguide,
+        research.market,
       );
 
       return {

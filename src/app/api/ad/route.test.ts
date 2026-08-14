@@ -24,6 +24,7 @@ const brief: AdBrief = {
   heroImageUrl: null,
   languages: ["en"],
   colors: [],
+  market: null,
 };
 
 const concept: PlannedConcept = {
