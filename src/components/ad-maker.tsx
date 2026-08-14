@@ -1224,12 +1224,46 @@ function TraitChip({ children }: { children: React.ReactNode }) {
 }
 
 /**
+ * One named line of the market read.
+ *
+ * Every other card on this page is a single field and says what it is in the
+ * label along its bottom edge. This one carries four, so each says its own
+ * name — otherwise "computer peripherals" above "mechanical keyboards" is two
+ * anonymous phrases, and which is the sector is anyone's guess until the sheet
+ * is opened. The names match the sheet's, so opening it holds still.
+ */
+function MarketField({
+  label,
+  children,
+  className = "",
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`min-w-0 py-2.5 first:pt-0 ${className}`}>
+      <p className="text-[9.5px] font-medium uppercase tracking-[0.11em] text-muted-foreground/60">
+        {label}
+      </p>
+      <div className="mt-1.5">{children}</div>
+    </div>
+  );
+}
+
+/** What the extract left blank, said as such rather than left as a gap. */
+function NotStated() {
+  return <p className="text-[12.5px] text-muted-foreground/50">Not stated</p>;
+}
+
+/**
  * The market read, standing up in a column.
  *
- * What the shop sells, then who buys it, read top to bottom. Only the four
- * fields that say something about the brand: `evidence`, `confidence` and
- * `source` record how the extract arrived at this, which is a question about
- * the extractor rather than about the brand being checked.
+ * What the shop sells, then who buys it, read top to bottom in the order the
+ * sheet edits them. Only the four fields that say something about the brand:
+ * `evidence`, `confidence` and `source` record how the extract arrived at
+ * this, which is a question about the extractor rather than about the brand
+ * being checked.
  */
 function MarketSummary({ market }: { market: MarketRead | null }) {
   if (!market) {
@@ -1241,35 +1275,55 @@ function MarketSummary({ market }: { market: MarketRead | null }) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
-      <div className="shrink-0">
-        {/* pr-7 here rather than on the column: the pencil sits in this
-            corner, and padding the whole card would narrow every line under
-            it to clear something only the first one reaches. */}
-        <p className="pr-7 text-[14px] leading-snug text-foreground">
-          {market.niche || market.sector || "Not stated"}
-        </p>
-        {market.niche && market.sector && (
-          <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+    // Divided and spread: four fields in one card need a line between them to
+    // read as four, and a column this tall has room left over — dealt evenly
+    // into the gaps it reads as a list, banked at the bottom it reads as one
+    // field that failed to load. A long read has no slack to spread and simply
+    // stacks from the top.
+    <div className="flex h-full min-h-0 flex-col justify-between divide-y divide-border overflow-hidden">
+      <MarketField label="Sector">
+        {/* pr-7 on this line alone: the pencil sits in this corner, and
+            padding the whole column would narrow every line under it to clear
+            something only the first one reaches. */}
+        {market.sector ? (
+          <p className="pr-7 text-[12.5px] leading-snug text-foreground">
             {market.sector}
           </p>
+        ) : (
+          <NotStated />
         )}
-      </div>
+      </MarketField>
 
-      {market.audience && (
-        <p className="min-h-0 flex-1 overflow-hidden text-[12px] leading-relaxed text-muted-foreground">
-          {market.audience}
-        </p>
-      )}
+      <MarketField label="Niche">
+        {market.niche ? (
+          <p className="text-[12.5px] leading-snug text-foreground">
+            {market.niche}
+          </p>
+        ) : (
+          <NotStated />
+        )}
+      </MarketField>
+
+      <MarketField label="Audience" className="min-h-0 overflow-hidden">
+        {market.audience ? (
+          <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+            {market.audience}
+          </p>
+        ) : (
+          <NotStated />
+        )}
+      </MarketField>
 
       {market.audienceTraits.length > 0 && (
-        // All of them, not the first few: the column is tall enough to wrap
-        // eight tags, and a count is only worth showing where they will not fit.
-        <div className="flex shrink-0 flex-wrap gap-1">
-          {market.audienceTraits.map((trait) => (
-            <TraitChip key={trait}>{trait}</TraitChip>
-          ))}
-        </div>
+        <MarketField label="Audience traits">
+          {/* All of them, not the first few: the column is tall enough to wrap
+              eight tags, and a count is only worth showing where they cannot. */}
+          <div className="flex flex-wrap gap-1">
+            {market.audienceTraits.map((trait) => (
+              <TraitChip key={trait}>{trait}</TraitChip>
+            ))}
+          </div>
+        </MarketField>
       )}
     </div>
   );
@@ -1464,8 +1518,13 @@ function BrandDna({ s }: { s: DnaController }) {
           width but a fifth of its height — which cut its own tags off, and
           took the height out of every other card to do it. Standing it up on
           the right gives the sentence somewhere to go, and hands the other
-          eight cards back the four rows they were drawn for. */}
-      <div className="mt-3 grid min-h-0 flex-1 grid-cols-5 grid-rows-4 gap-2.5">
+          eight cards back the four rows they were drawn for.
+
+          Its column is wider than the other four. An even fifth is enough for
+          a swatch or a type name, and this card carries four labelled fields
+          and a paragraph — at that width the audience broke every three or
+          four words, which is what made a short sentence look like a wall. */}
+      <div className="mt-3 grid min-h-0 flex-1 grid-cols-[repeat(4,minmax(0,1fr))_minmax(0,1.7fr)] grid-rows-4 gap-2.5">
         <DnaCard
           label="Logo"
           className="col-span-2 row-span-2"
