@@ -43,9 +43,12 @@ export type { BrandColor } from "@/lib/brand-color";
  *
  * Inferred rather than scraped — every other field on the Brief is something
  * the site states about itself, and this one is a model's answer about it. It
- * carries its own `confidence` and `source` for that reason, and it does not
- * reach an ad: it is shown so the read can be checked and corrected, not so it
- * can be rendered. Nothing here is written into a prompt or a canonical URL.
+ * carries its own `confidence` and `source` for that reason.
+ *
+ * It never reaches an image prompt or a canonical URL. The audience does reach
+ * the art director, which is a reasoning step deciding who one picture talks to
+ * — and what reaches the image from there is the director's own sentence about
+ * this ad, not the read itself.
  */
 export type MarketRead = {
   /** The broad category, e.g. "computer accessories". */

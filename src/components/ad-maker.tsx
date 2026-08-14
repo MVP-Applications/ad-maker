@@ -1887,7 +1887,37 @@ type Composition = {
   status: "loading" | "done" | "error";
   url?: string;
   message?: string;
+  /**
+   * What the art director decided, and why. Shown because an agent that makes
+   * the call silently is one nobody can correct: seeing "promo offer, Type
+   * Poster" against an image that should have been a hero shot is how a person
+   * learns to ask for the hero shot.
+   */
+  note?: string;
 };
+
+/**
+ * The director's reasoning, as it travels: percent-encoded header values, since
+ * a rationale written for an Arabic shop is not latin-1.
+ */
+function directorNote(headers: Headers): string | undefined {
+  const read = (name: string) => {
+    const raw = headers.get(name);
+    if (!raw) return "";
+    try {
+      return decodeURIComponent(raw);
+    } catch {
+      return "";
+    }
+  };
+
+  const label = [read("X-Ad-Type"), read("X-Ad-Direction")]
+    .filter(Boolean)
+    .map((value) => value.replace(/_/g, " "))
+    .join(" · ");
+  const rationale = read("X-Ad-Rationale");
+  return [label, rationale].filter(Boolean).join(" — ") || undefined;
+}
 
 function Studio({ s }: { s: StudioController }) {
   const [prompt, setPrompt] = useState("");
@@ -1940,15 +1970,28 @@ function Studio({ s }: { s: StudioController }) {
       const response = await fetch("/api/compose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        /**
+         * Everything the art director can reason from. The brand half is what
+         * the person should not have to retype; the catalogue half is what lets
+         * a request that names no Product still come back holding real ones —
+         * "an ad for our bestsellers" has nothing to choose from otherwise.
+         */
         body: JSON.stringify({
           prompt: asked,
           model,
           aspectRatio,
           brandName: s.brief.brandName,
+          domain: s.brief.domain,
+          industry: s.brief.industry,
+          summary: s.brief.summary,
+          mood: s.brief.mood,
           colorA: s.brief.colorA,
           colorB: s.brief.colorB,
           fontFamily: s.brief.fontFamily,
+          audience: s.brief.market?.audience ?? "",
+          language: s.brief.languages[0] ?? "",
           products,
+          catalog: s.products,
         }),
       });
 
@@ -1968,9 +2011,10 @@ function Studio({ s }: { s: StudioController }) {
         return;
       }
 
+      const note = directorNote(response.headers);
       const url = URL.createObjectURL(await response.blob());
       setMade((was) =>
-        was.map((c) => (c.id === id ? { ...c, status: "done", url } : c)),
+        was.map((c) => (c.id === id ? { ...c, status: "done", url, note } : c)),
       );
     } catch {
       setMade((was) =>
@@ -2130,6 +2174,11 @@ function CompositionTile({
               <p className="line-clamp-2 text-[11px] leading-snug text-white/85">
                 {c.prompt}
               </p>
+              {c.note && (
+                <p className="mt-1 line-clamp-2 text-[10px] leading-snug text-white/50">
+                  {c.note}
+                </p>
+              )}
               <div className="pointer-events-auto mt-2">
                 <a
                   href={c.url}

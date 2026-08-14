@@ -3,6 +3,13 @@ import { NextResponse } from "next/server";
 import { AD_RUN_LIMITS } from "@/lib/ad-run-policy";
 import { normalizeFontFamily } from "@/lib/font-family";
 import {
+  buildDirectedPrompt,
+  resolveProducts,
+  type ArtContext,
+  type CatalogProduct,
+} from "@/lib/generate/art-plan";
+import { directArtwork } from "@/lib/generate/director";
+import {
   manyArticlesFidelity,
   oneArticleFidelity,
 } from "@/lib/generate/fidelity";
@@ -28,11 +35,17 @@ import { parsePublicHttpUrl } from "@/lib/public-url";
 /**
  * POST /api/compose — one image from a person's own words.
  *
- * The planned Ad Run answers "advertise this brand" and decides the six
- * concepts itself. This answers a different question — "make me this" — so it
- * takes the direction as typed and only supplies what the person should not
- * have to retype: the brand's name, its two colours, and its typeface. The
- * words lead; the brand follows.
+ * The planned Ad Run answers "advertise this brand" and decides the six concepts
+ * itself. This answers a different question — "make me this" — so the words lead
+ * and the brand follows.
+ *
+ * What sits between the two is the art director. This route used to hand an
+ * image model the request and every fact it held about the named Products, in
+ * one flat block, and a price and a catalogue description travelled as quoted
+ * strings beside the brand name. Image models render quoted strings, so every
+ * composed ad came back with its price stamped across it. Now a reasoning model
+ * decides what the picture is and, crucially, the exact list of strings it may
+ * contain; the facts still travel, fenced as knowledge rather than as copy.
  */
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -57,144 +70,35 @@ const fail = (message: string, status: number) =>
  */
 const MENTION_MAX = 5;
 
-/** The subset of a catalogue entry an image needs. */
-type MentionedProduct = {
-  name: string;
-  description: string;
-  imageUrl: string | null;
-  price: number | null;
-  currency: string | null;
-};
+/**
+ * How much of the shop the director may read.
+ *
+ * Named Products are the person's own choice and always travel. This is the
+ * rest — what a request like "an ad for our bestsellers" gets to choose from —
+ * and it is bounded here rather than at the director because a 680-product
+ * catalogue reaching a request body is a payload problem before it is a
+ * prompting one.
+ */
+const CATALOG_MAX = 24;
 
 /**
  * One Product and the photograph of it that will travel with the prompt.
  *
- * Both forms of the same picture: `bytes` rides along with the prompt on a
- * model that takes one, and `url` is what fal's editing path is given, which is
- * the only way those models look at a reference at all.
+ * Both forms of the same picture: `bytes` rides along with the prompt on a model
+ * that takes one, and `url` is what fal's editing path is given, which is the
+ * only way those models look at a reference at all.
  */
 type Photographed = {
-  product: MentionedProduct;
+  product: CatalogProduct;
   bytes: Uint8Array;
   url: string;
 };
 
-/** Name, price and description on one line, however the Product is being shown. */
-function productLine(product: MentionedProduct): string {
-  const price =
-    product.price !== null && product.currency
-      ? ` (${product.currency} ${product.price})`
-      : "";
-  return `"${product.name}"${price} — ${product.description}`;
-}
-
-/**
- * The Products the person named, stated as the only ones that exist.
- *
- * Without this the model invents: "an ad for 5 perfumes" against a shop with 107
- * of them produced five bottles named Noir Essence, Royal Oud and Bella Rose,
- * none of which nouvona.com sells. Naming the real ones — and saying plainly
- * that they are the only ones — is what stops that.
- *
- * The photographed ones are numbered against the attachments themselves rather
- * than against the list, because the two disagree the moment a Product has no
- * photograph on file or its photograph fails to load. A single numbering across
- * both claimed the second attachment was the second name; name three, photograph
- * the first and third, and the model is being told the second bottle it can see
- * is called what the second name says — which is the labelling this whole block
- * exists to prevent.
- */
-function productLines(
-  photographed: readonly MentionedProduct[],
-  described: readonly MentionedProduct[],
-): string {
-  const total = photographed.length + described.length;
-  if (total === 0) return "";
-
-  return [
-    `THE PRODUCTS IN THIS IMAGE — exactly these ${total}, and no others:`,
-    ...photographed.map(
-      (product, index) => `Photograph ${index + 1} is ${productLine(product)}`,
-    ),
-    ...described.map(
-      (product) =>
-        `${productLine(product)} (no photograph supplied — build it from this description alone).`,
-    ),
-    `Do not add any product that is not listed above, and do not invent names, brands or claims for them.`,
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
-/**
- * Three rules every composed image closes with, adapted from the image-ad
- * prompt library in arcads-claude-code (MIT).
- *
- * None of them is creative direction — the direction is the person's, and these
- * do not touch it. Each forbids one thing the model was never asked for and
- * reaches for anyway, and each is a failure that shows up across every current
- * image model rather than on one provider.
- */
-const GUARDRAILS = [
-  // Asked for an ad, a model will hand back a picture of a phone showing one.
-  `Render the advertisement itself, edge to edge — not a screenshot of one sitting in a feed. No app or platform interface of any kind: no profile row, avatar, handle or Sponsored label; no caption or post text; no like, comment, share or save buttons; no engagement counts; no navigation or tab bars; no story progress bars; no phone, browser or device chrome.`,
-  // A headline is worth nothing with its last two letters past the canvas.
-  `Keep every piece of text and every focal subject within the central 84% of the canvas, leaving roughly 8% clear on all four sides. Backgrounds and fields of colour may run to the edge; words and subjects may not touch or cross it. If a subject will not fit, scale it down — never crop the text.`,
-  // Both halves of one habit: treating text as texture rather than as language.
-  `Inside any block of text, use plain words only — no emoji, no decorative unicode, no stray symbols mid-sentence. Where this prompt states a count, render exactly that many: nothing extra invented, nothing left out.`,
-];
-
-/** Kept out of the model's way: the direction is the person's, not ours. */
-function composePrompt(input: {
-  prompt: string;
-  brandName: string;
-  colorA: string;
-  colorB: string;
-  fontFamily: string | null;
-  photographed: readonly MentionedProduct[];
-  described: readonly MentionedProduct[];
-}): string {
-  const brand = [
-    `Brand: ${input.brandName}.`,
-    input.colorA && input.colorB
-      ? `Brand colours: ${input.colorA} and ${input.colorB}.`
-      : "",
-    input.fontFamily ? `Typography echoes ${input.fontFamily}.` : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  /**
-   * Last, which is the position an image model weighs most — the same place the
-   * Ad Run puts the rules it cannot afford to lose. It has to outrank the brand
-   * colours stated above it, and a rule about the article beats a rule about
-   * the picture, so the guardrails give up the closing position to it.
-   *
-   * One article gets the Ad Run's own wording rather than a plural rewrite of
-   * it: that is the sentence with the most evidence behind it.
-   */
-  const fidelity =
-    input.photographed.length === 1
-      ? oneArticleFidelity(input.photographed[0].name)
-      : input.photographed.length > 1
-        ? manyArticlesFidelity(input.photographed.length)
-        : "";
-
-  return [
-    input.prompt.trim(),
-    "",
-    brand,
-    productLines(input.photographed, input.described),
-    "Advertising photography. No watermarks. Do not print any hex codes or colour names as text.",
-    ...GUARDRAILS,
-    fidelity,
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
+const text = (value: unknown, max: number): string =>
+  typeof value === "string" ? value.trim().slice(0, max) : "";
 
 /** Bounded the same way the rest of this route is: shape first, trust never. */
-function mentionedProducts(value: unknown): MentionedProduct[] {
+function catalogProducts(value: unknown, limit: number): CatalogProduct[] {
   if (!Array.isArray(value)) return [];
 
   return value
@@ -224,25 +128,22 @@ function mentionedProducts(value: unknown): MentionedProduct[] {
         },
       ];
     })
-    .slice(0, MENTION_MAX);
+    .slice(0, limit);
 }
-
-const text = (value: unknown, max: number): string =>
-  typeof value === "string" ? value.trim().slice(0, max) : "";
 
 /**
  * The photographs, each still holding on to the Product it shows.
  *
- * Naming a Product stops the model inventing its name; only the photograph
- * stops it inventing the article. Loaded through the same public-raster check
- * the Ad Run uses, and a photo that will not load costs its Product a likeness
- * rather than costing the image — which is exactly why the pairing is carried
- * rather than the position: the Products that drop out here are not the ones
- * the prompt would have counted past.
+ * Naming a Product stops the model inventing its name; only the photograph stops
+ * it inventing the article. Loaded through the same public-raster check the Ad
+ * Run uses, and a photo that will not load costs its Product a likeness rather
+ * than costing the image — which is exactly why the pairing is carried rather
+ * than the position: the Products that drop out here are not the ones the prompt
+ * would have counted past.
  */
 async function loadPhotographs(
   model: ImageModel,
-  products: readonly MentionedProduct[],
+  products: readonly CatalogProduct[],
   signal: AbortSignal,
 ): Promise<Photographed[]> {
   const capacity = photographCapacity(model);
@@ -271,6 +172,24 @@ async function loadPhotographs(
   // photograph the model was never going to look at.
   return loaded.flatMap((entry) => (entry ? [entry] : [])).slice(0, capacity);
 }
+
+/**
+ * The director's reasoning, carried back beside the picture.
+ *
+ * Headers rather than a JSON envelope because the body is the image itself and
+ * always has been. Percent-encoded because a rationale written for an Arabic
+ * shop is not latin-1, and a header that is not latin-1 throws rather than
+ * degrades.
+ */
+const directionHeaders = (input: {
+  adType: string;
+  direction: string;
+  rationale: string;
+}) => ({
+  "X-Ad-Type": encodeURIComponent(input.adType),
+  "X-Ad-Direction": encodeURIComponent(input.direction),
+  "X-Ad-Rationale": encodeURIComponent(input.rationale),
+});
 
 export async function POST(req: Request) {
   if (!hasGatewayConfiguration()) {
@@ -303,22 +222,70 @@ export async function POST(req: Request) {
     return fail(`${model.displayName} cannot render ${ratio}.`, 400);
   }
 
-  const products = mentionedProducts(body.products);
-
-  // Composed after the photographs, because which Products have one is what
-  // the numbering in the prompt is counting.
-  const photographs = await loadPhotographs(model, products, req.signal);
-  const shown = new Set(photographs.map(({ product }) => product));
-
-  const composed = composePrompt({
-    prompt,
+  const named = catalogProducts(body.products, MENTION_MAX);
+  const context: ArtContext = {
+    request: prompt,
     brandName: text(body.brandName, AD_RUN_LIMITS.brandName) || "the brand",
+    domain: text(body.domain, AD_RUN_LIMITS.domain),
+    industry: text(body.industry, AD_RUN_LIMITS.industry),
+    summary: text(body.summary, AD_RUN_LIMITS.summary),
+    mood: text(body.mood, AD_RUN_LIMITS.mood),
     colorA: text(body.colorA, AD_RUN_LIMITS.promptColor),
     colorB: text(body.colorB, AD_RUN_LIMITS.promptColor),
     fontFamily: normalizeFontFamily(body.fontFamily),
+    audience: text(body.audience, AD_RUN_LIMITS.audience),
+    language: text(body.language, AD_RUN_LIMITS.language),
+    named,
+    catalog: catalogProducts(body.catalog, CATALOG_MAX),
+    aspectRatio: ratio,
+    photographCapacity: Math.min(photographCapacity(model), MENTION_MAX),
+  };
+
+  let plan;
+  try {
+    plan = await directArtwork(context, req.signal);
+  } catch {
+    if (req.signal.aborted) return fail("Cancelled.", 499);
+    return fail("That image failed to render. Try again.", 502);
+  }
+
+  /**
+   * Which Products the picture actually holds is the director's answer, not the
+   * request's: a person who named none may still get a range, and one who named
+   * three may be given a hero and two supporting articles. The photographs are
+   * loaded after that decision because the numbering in the prompt counts them.
+   */
+  const subjects = resolveProducts(
+    [...plan.heroProducts, ...plan.supportingProducts],
+    context,
+  ).slice(0, MENTION_MAX);
+
+  const photographs = await loadPhotographs(model, subjects, req.signal);
+  const shown = new Set(photographs.map(({ product }) => product));
+
+  /**
+   * One article gets the Ad Run's own wording rather than a plural rewrite of
+   * it: that is the sentence with the most evidence behind it.
+   */
+  const fidelity =
+    photographs.length === 1
+      ? oneArticleFidelity(photographs[0].product.name)
+      : photographs.length > 1
+        ? manyArticlesFidelity(photographs.length)
+        : "";
+
+  const composed = buildDirectedPrompt({
+    plan,
+    context,
     photographed: photographs.map(({ product }) => product),
-    described: products.filter((product) => !shown.has(product)),
+    described: subjects.filter((product) => !shown.has(product)),
+    fidelity,
   });
+
+  const headers = {
+    ...NO_STORE,
+    ...directionHeaders(plan),
+  };
 
   try {
     /**
@@ -347,7 +314,7 @@ export async function POST(req: Request) {
       return new NextResponse(Buffer.from(edited.bytes), {
         headers: {
           "Content-Type": edited.mediaType || "image/png",
-          ...NO_STORE,
+          ...headers,
         },
       });
     }
@@ -381,7 +348,7 @@ export async function POST(req: Request) {
     return new NextResponse(Buffer.from(bytes), {
       headers: {
         "Content-Type": image.mediaType ?? "image/png",
-        ...NO_STORE,
+        ...headers,
       },
     });
   } catch (cause) {

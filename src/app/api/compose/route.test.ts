@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   falEditImage: vi.fn(),
   fetchPublicRaster: vi.fn(),
   hasGatewayConfiguration: vi.fn(() => true),
+  directArtwork: vi.fn(),
 }));
 
 vi.mock("ai", () => ({ generateImage: mocks.generateImage }));
@@ -19,7 +20,51 @@ vi.mock("@/lib/public-raster", () => ({
   fetchPublicRaster: mocks.fetchPublicRaster,
 }));
 
+/**
+ * The art director is a reasoning call, and this route's job is what it does
+ * with the answer. Stubbed to the plan the route falls back to anyway, so every
+ * test below reads as it did before there was a director; the tests that are
+ * about the director hand it a plan of their own.
+ */
+vi.mock("@/lib/generate/director", () => ({
+  directArtwork: mocks.directArtwork,
+}));
+
+import {
+  enforceArtPlan,
+  fallbackArtPlan,
+  type ArtContext,
+  type RawArtPlan,
+} from "@/lib/generate/art-plan";
 import { POST } from "./route";
+
+/** Answer the next compose with this plan, corrected the way the director's is. */
+const directs = (plan: Partial<RawArtPlan>) =>
+  mocks.directArtwork.mockImplementation(async (context: ArtContext) =>
+    enforceArtPlan(
+      {
+        adType: "product_hero",
+        direction: "product_hero",
+        rationale: "",
+        audienceNote: "",
+        heroProducts: [],
+        supportingProducts: [],
+        scene: "",
+        buyerAskedForPeople: false,
+        buyerAskedForPrice: false,
+        palette: {
+          background: context.colorA,
+          ink: context.colorB,
+          accent: context.colorB,
+        },
+        typeface: "Inter",
+        layout: "poster_stack",
+        blocks: [],
+        ...plan,
+      },
+      context,
+    ),
+  );
 
 /** One pixel of PNG, which is all the route ever looks at. */
 const PIXEL = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64");
@@ -66,6 +111,10 @@ describe("POST /api/compose", () => {
     mocks.falEditImage.mockReset();
     mocks.fetchPublicRaster.mockReset();
     mocks.hasGatewayConfiguration.mockReturnValue(true);
+    mocks.directArtwork.mockReset();
+    mocks.directArtwork.mockImplementation(async (context: ArtContext) =>
+      fallbackArtPlan(context),
+    );
     mocks.generateImage.mockResolvedValue({
       image: { base64: PIXEL, mediaType: "image/png" },
     });
@@ -235,11 +284,11 @@ describe("POST /api/compose", () => {
       const { text } = asked();
       // The brand colours are still stated — they are just no longer the last
       // word on what colour the keyboard is.
-      expect(text).toContain("Brand colours: vivid teal and deep navy.");
+      expect(text).toContain("Palette: vivid teal as the dominant field");
       expect(text).toContain("COLOUR OVERRIDE");
       expect(text).toContain("keeps its own real colours");
       expect(text.indexOf("COLOUR OVERRIDE")).toBeGreaterThan(
-        text.indexOf("Brand colours:"),
+        text.indexOf("Palette: vivid teal"),
       );
       expect(text.trimEnd().endsWith("redrawing the product is not.")).toBe(
         true,
@@ -332,6 +381,143 @@ describe("POST /api/compose", () => {
       await post({ model: "fal/fal-ai/imagen4/preview/ultra" });
 
       expect(asked().request.aspectRatio).toBe("1:1");
+    });
+  });
+
+  describe("the art director", () => {
+    it("is given the brand, the market and the shop to reason from", async () => {
+      await post({
+        domain: "nouvona.com",
+        industry: "fragrance",
+        summary: "They sell perfume.",
+        audience: "Women in the Gulf buying gifts.",
+        language: "ar",
+        catalog: [product("Oud Royal", null)],
+      });
+
+      const [context] = mocks.directArtwork.mock.calls[0];
+      expect(context.domain).toBe("nouvona.com");
+      expect(context.audience).toBe("Women in the Gulf buying gifts.");
+      expect(context.language).toBe("ar");
+      expect(context.catalog.map((p: { name: string }) => p.name)).toEqual([
+        "Oud Royal",
+      ]);
+      expect(context.aspectRatio).toBe("1:1");
+      // gpt-image-2 takes five, and the picture will hold no more than five.
+      expect(context.photographCapacity).toBe(5);
+    });
+
+    /**
+     * "An ad for our bestsellers" names nothing. Before the director the image
+     * came back holding invented bottles; now it holds the ones the shop
+     * actually lists, because the director picked them by name.
+     */
+    it("puts real Products in an image that named none", async () => {
+      mocks.fetchPublicRaster.mockImplementation(async () => photo(1));
+      directs({ heroProducts: ["Oud Royal", "Bella Nera"] });
+
+      await post({
+        prompt: "an ad for our bestsellers",
+        catalog: [
+          product("Oud Royal", "https://cdn.example/oud.png"),
+          product("Bella Nera", "https://cdn.example/nera.png"),
+          product("Rose in Wonderland", "https://cdn.example/rose.png"),
+        ],
+      });
+
+      const { text, images } = asked();
+      expect(images).toHaveLength(2);
+      expect(text).toContain('Photograph 1 is "Oud Royal"');
+      expect(text).toContain('Photograph 2 is "Bella Nera"');
+      expect(text).not.toContain("Rose in Wonderland");
+    });
+
+    it("keeps the price out of a hero shot and prints it on an offer", async () => {
+      directs({
+        adType: "product_hero",
+        heroProducts: ["Bella Nera"],
+        blocks: [
+          {
+            role: "headline",
+            text: "Wear the night",
+            sizePercent: 14,
+            weight: "bold",
+            case: "as_written",
+            placement: "top_left",
+          },
+          {
+            role: "price",
+            text: "SAR 450",
+            sizePercent: 5,
+            weight: "medium",
+            case: "as_written",
+            placement: "bottom_right",
+          },
+        ],
+      });
+      await post({ products: [product("Bella Nera", null)] });
+
+      const hero = asked().text;
+      expect(hero).toContain('"Wear the night"');
+      expect(hero).not.toContain('"SAR 450"');
+      // Still known, so the article is lit like the thing it costs.
+      expect(hero).toContain("Listed at SAR 450.");
+
+      mocks.generateImage.mockClear();
+      directs({
+        adType: "promo_offer",
+        heroProducts: ["Bella Nera"],
+        blocks: [
+          {
+            role: "headline",
+            text: "Wear the night",
+            sizePercent: 14,
+            weight: "bold",
+            case: "as_written",
+            placement: "top_left",
+          },
+          {
+            role: "price",
+            text: "SAR 450",
+            sizePercent: 5,
+            weight: "medium",
+            case: "as_written",
+            placement: "bottom_right",
+          },
+        ],
+      });
+      await post({ products: [product("Bella Nera", null)] });
+
+      expect(asked().text).toContain('"SAR 450" — the price');
+    });
+
+    /** An agent that decides silently is one nobody can correct. */
+    it("hands its reasoning back beside the picture", async () => {
+      directs({
+        adType: "promo_offer",
+        direction: "typographic",
+        rationale: "الطلب يسأل عن عرض",
+      });
+
+      const response = await post({});
+      expect(response.headers.get("X-Ad-Type")).toBe("promo_offer");
+      expect(response.headers.get("X-Ad-Direction")).toBe("typographic");
+      expect(
+        decodeURIComponent(response.headers.get("X-Ad-Rationale") ?? ""),
+      ).toBe("الطلب يسأل عن عرض");
+    });
+
+    /**
+     * The director carries its own fallback, so reaching here means something
+     * broke that was not planned for. An undirected image is the failure this
+     * route was rewritten to stop shipping, so it ships nothing instead.
+     */
+    it("refuses rather than render an image nobody directed", async () => {
+      mocks.directArtwork.mockRejectedValue(new Error("gateway down"));
+
+      const response = await post({});
+      expect(response.status).toBe(502);
+      expect(mocks.generateImage).not.toHaveBeenCalled();
     });
   });
 
