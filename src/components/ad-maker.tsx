@@ -2046,7 +2046,12 @@ function Studio({ s }: { s: StudioController }) {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-px bg-white/[0.14] sm:grid-cols-2 xl:grid-cols-3">
+            // The hairlines belong to the tiles, not to the grid behind them.
+            // Painting the container and letting 1px gaps show through draws a
+            // clean mosaic only while the last row is full: three columns and
+            // one image leaves two cells with nothing over them, and the grid's
+            // own paint becomes a grey slab sitting beside the picture.
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
               {made.map((c, position) => (
                 <CompositionTile
                   key={c.id}
@@ -2105,7 +2110,10 @@ function CompositionTile({
   const [loaded, setLoaded] = useState(false);
 
   return (
-    <div className="group studio-bg relative aspect-square overflow-hidden">
+    // Right and bottom only: every edge between two tiles is drawn once, by
+    // the one above or to the left of it, so the seams stay a single hairline
+    // and an empty cell draws nothing at all.
+    <div className="group studio-bg relative aspect-square overflow-hidden border-b border-r border-white/[0.14]">
       {c.status === "done" && c.url ? (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
