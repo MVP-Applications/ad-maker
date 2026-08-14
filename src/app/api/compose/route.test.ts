@@ -36,7 +36,8 @@ import {
   type ArtContext,
   type RawArtPlan,
 } from "@/lib/generate/art-plan";
-import { POST, type ComposeEvent as Event } from "./route";
+import { POST } from "./route";
+import type { ComposeEvent as Event } from "@/lib/generate/art-plan";
 
 /**
  * Answer the next compose with a set holding this one plan.

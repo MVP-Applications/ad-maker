@@ -64,8 +64,11 @@ import {
   supportedRatios,
   type AspectRatio,
 } from "@/lib/generate/shape";
-import { SET_SIZE, type PriorChoice } from "@/lib/generate/art-plan";
-import type { ComposeEvent } from "@/app/api/compose/route";
+import {
+  SET_SIZE,
+  type ComposeEvent,
+  type PriorChoice,
+} from "@/lib/generate/art-plan";
 import type { AdMakerController, AdSlot } from "@/hooks/use-ad-maker";
 
 type IdleController = Extract<AdMakerController, { phase: "idle" }>;

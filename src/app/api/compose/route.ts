@@ -8,6 +8,7 @@ import {
   type ArtContext,
   type ArtPlan,
   type CatalogProduct,
+  type ComposeEvent,
   type PriorChoice,
 } from "@/lib/generate/art-plan";
 import { directArtwork } from "@/lib/generate/director";
@@ -250,32 +251,7 @@ const AVOID_MAX = 4;
 /** One finished picture, before it is encoded for the stream. */
 type Rendered = { bytes: Uint8Array; mediaType: string };
 
-/**
- * What travels down the stream.
- *
- * `set` arrives first and carries every concept the director decided, so six
- * tiles can appear the moment the planning call returns rather than when the
- * first picture does. `image` and `error` then arrive in whatever order the
- * renders finish, each addressed by the index it belongs to.
- */
-export type ComposeEvent =
-  | {
-      type: "set";
-      concepts: {
-        index: number;
-        conceptName: string;
-        family: string;
-        adType: string;
-        idea: string;
-        craft: {
-          lighting: string | null;
-          surface: string | null;
-          finish: string | null;
-        };
-      }[];
-    }
-  | { type: "image"; index: number; mediaType: string; data: string }
-  | { type: "error"; index: number; message: string };
+
 
 export async function POST(req: Request) {
   if (!hasGatewayConfiguration()) {

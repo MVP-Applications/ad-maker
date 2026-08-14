@@ -319,6 +319,33 @@ export type ArtContext = {
   avoid: readonly PriorChoice[];
 };
 
+/**
+ * What travels down the stream.
+ *
+ * `set` arrives first and carries every concept the director decided, so six
+ * tiles can appear the moment the planning call returns rather than when the
+ * first picture does. `image` and `error` then arrive in whatever order the
+ * renders finish, each addressed by the index it belongs to.
+ */
+export type ComposeEvent =
+  | {
+      type: "set";
+      concepts: {
+        index: number;
+        conceptName: string;
+        family: string;
+        adType: string;
+        idea: string;
+        craft: {
+          lighting: string | null;
+          surface: string | null;
+          finish: string | null;
+        };
+      }[];
+    }
+  | { type: "image"; index: number; mediaType: string; data: string }
+  | { type: "error"; index: number; message: string };
+
 /** One picture already made, reduced to the choices worth not repeating. */
 export type PriorChoice = {
   direction: string;
