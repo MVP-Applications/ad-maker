@@ -2,6 +2,7 @@ import { generateImage as generateImageWithAi } from "ai";
 import type { RenderedAdQuery } from "@/lib/ad-run";
 import { fetchPublicRaster, type PublicRaster } from "@/lib/public-raster";
 import { buildConceptPrompt, buyerRequestBlock } from "./concepts";
+import { oneArticleFidelity } from "./fidelity";
 import {
   classifyGatewayImageError,
   falEditImage,
@@ -109,20 +110,11 @@ const LOGO_INSTRUCTION = (brandName: string) =>
 
 /**
  * The direction above describes a scene in the brand's colours, and a Product
- * ad supplies the real article — read together they say "recolour this". They
- * did: a white keyboard came back tinted brand-teal with its chamfered edge
- * flattened, because a single-hue render deletes the contrast an edge is made
- * of. So the palette is scoped to the scene here, last, where it wins.
+ * ad supplies the real article. Why each paragraph exists lives with the words
+ * themselves, in `fidelity.ts`, because the studio attaches photographs too and
+ * the reasons are the same there.
  */
-const PRODUCT_INSTRUCTION = (productName: string) =>
-  [
-    `The attached image is the REAL ${productName}. The product shown in this ad MUST be this exact article — match its silhouette, proportions, panel edges, materials, finish and markings faithfully. Study the reference and reproduce its geometry; never redesign it, never substitute a similar-looking product, and never invent surface details it does not have.`,
-    `COLOUR OVERRIDE — this outranks the palette instructions above: the brand colours apply to the BACKGROUND, the lighting, and the TYPOGRAPHY only. The product itself keeps its own real colours and materials exactly as photographed. Do not tint, recolour, or restyle it to match the palette.`,
-    // Without this the block reads as "change nothing", and a scene the buyer
-    // asked for loses to it: the product came back faithful and the forest it
-    // was supposed to be standing in never appeared.
-    `SCOPE: everything above governs the PRODUCT ITSELF, not the picture around it. The setting, background, surface, props, atmosphere and camera are set elsewhere in this brief — build whatever scene is described there and place this exact article into it. Relighting the product to match that scene is correct; redrawing the product is not.`,
-  ].join("\n\n");
+const PRODUCT_INSTRUCTION = oneArticleFidelity;
 
 /** What one reference image is, and how its model takes it. */
 type Reference = { attachment: ImageAttachment; instruction: string };

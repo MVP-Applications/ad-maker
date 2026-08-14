@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 import { AD_RUN_LIMITS } from "@/lib/ad-run-policy";
 import { normalizeFontFamily } from "@/lib/font-family";
 import {
+  manyArticlesFidelity,
+  oneArticleFidelity,
+} from "@/lib/generate/fidelity";
+import {
   gatewayImageModel,
   hasGatewayConfiguration,
 } from "@/lib/generate/gateway";
@@ -104,9 +108,6 @@ function productLines(
       (product) =>
         `${productLine(product)} (no photograph supplied — build it from this description alone).`,
     ),
-    photographed.length > 0
-      ? `Each attached photograph is the REAL article, and the numbering above says which photograph is which Product. Reproduce each one exactly as photographed — its shape, cap, label, materials and colours. Never substitute a similar-looking product, never invent an extra one, and never redraw a label.`
-      : "",
     `Do not add any product that is not listed above, and do not invent names, brands or claims for them.`,
   ]
     .filter(Boolean)
@@ -151,6 +152,22 @@ function composePrompt(input: {
     .filter(Boolean)
     .join(" ");
 
+  /**
+   * Last, which is the position an image model weighs most — the same place the
+   * Ad Run puts the rules it cannot afford to lose. It has to outrank the brand
+   * colours stated above it, and a rule about the article beats a rule about
+   * the picture, so the guardrails give up the closing position to it.
+   *
+   * One article gets the Ad Run's own wording rather than a plural rewrite of
+   * it: that is the sentence with the most evidence behind it.
+   */
+  const fidelity =
+    input.photographed.length === 1
+      ? oneArticleFidelity(input.photographed[0].name)
+      : input.photographed.length > 1
+        ? manyArticlesFidelity(input.photographed.length)
+        : "";
+
   return [
     input.prompt.trim(),
     "",
@@ -158,6 +175,7 @@ function composePrompt(input: {
     productLines(input.photographed, input.described),
     "Advertising photography. No watermarks. Do not print any hex codes or colour names as text.",
     ...GUARDRAILS,
+    fidelity,
   ]
     .filter(Boolean)
     .join("\n");
@@ -292,6 +310,16 @@ export async function POST(req: Request) {
       ...(shape.kind === "pixel_size"
         ? { size: shape.size }
         : { aspectRatio: shape.aspectRatio }),
+      /**
+       * Fine material detail is what this buys, and a photographed article is
+       * what spends it: NuPhy's WH80 came back with its transparent keycaps
+       * rendered solid at medium, having got the case, light bar and layout
+       * right. Refraction, micro-texture and small markings degrade first, and
+       * they are exactly what makes a reproduced article recognisable.
+       */
+      providerOptions: {
+        openai: { quality: photographs.length > 0 ? "high" : "medium" },
+      },
       maxRetries: 0,
       abortSignal: req.signal,
     });

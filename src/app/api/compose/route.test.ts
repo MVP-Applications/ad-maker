@@ -107,6 +107,7 @@ describe("POST /api/compose", () => {
       expect(text).toContain('Photograph 2 is "Bella Nera"');
       expect(text).not.toContain('Photograph 2 is "Oud Royal"');
       expect(text).toContain("exactly these 3, and no others");
+      expect(text).toContain("The 2 attached photographs are the REAL articles");
     });
 
     it("still names a Product whose photograph never arrived", async () => {
@@ -142,6 +143,81 @@ describe("POST /api/compose", () => {
       expect(text).toContain('"Bella Nera"');
       expect(text).toContain("no photograph supplied");
       expect(text).not.toContain("Photograph 1 is");
+    });
+  });
+
+  describe("keeping a photographed article as it really is", () => {
+    beforeEach(() =>
+      mocks.fetchPublicRaster.mockImplementation(async () => photo(1)),
+    );
+
+    it("takes the palette away from the product, and says so last", async () => {
+      await post({
+        colorA: "vivid teal",
+        colorB: "deep navy",
+        products: [product("WH80", "https://cdn.example/wh80.png")],
+      });
+
+      const { text } = asked();
+      // The brand colours are still stated — they are just no longer the last
+      // word on what colour the keyboard is.
+      expect(text).toContain("Brand colours: vivid teal and deep navy.");
+      expect(text).toContain("COLOUR OVERRIDE");
+      expect(text).toContain("keeps its own real colours");
+      expect(text.indexOf("COLOUR OVERRIDE")).toBeGreaterThan(
+        text.indexOf("Brand colours:"),
+      );
+      expect(text.trimEnd().endsWith("redrawing the product is not.")).toBe(
+        true,
+      );
+    });
+
+    it("leaves the scene to the person who described it", async () => {
+      await post({
+        prompt: "on a desk in a forest at dawn",
+        products: [product("WH80", "https://cdn.example/wh80.png")],
+      });
+
+      const { text } = asked();
+      expect(text).toContain("SCOPE:");
+      expect(text).toContain("build whatever scene is described there");
+    });
+
+    it("speaks of one article in the singular and several by number", async () => {
+      await post({ products: [product("WH80", "https://cdn.example/wh80.png")] });
+      expect(asked().text).toContain("The attached image is the REAL WH80.");
+
+      mocks.generateImage.mockClear();
+      await post({
+        products: [
+          product("WH80", "https://cdn.example/wh80.png"),
+          product("Halo75", "https://cdn.example/halo.png"),
+        ],
+      });
+      const { text } = asked();
+      expect(text).toContain("The 2 attached photographs are the REAL articles");
+      expect(text).toContain("numbered against above");
+    });
+
+    it("spends the quality a reproduced article needs, and only then", async () => {
+      await post({ products: [product("WH80", "https://cdn.example/wh80.png")] });
+      expect(asked().request.providerOptions).toEqual({
+        openai: { quality: "high" },
+      });
+
+      mocks.generateImage.mockClear();
+      await post({});
+      expect(asked().request.providerOptions).toEqual({
+        openai: { quality: "medium" },
+      });
+    });
+
+    it("says nothing about fidelity when nothing was attached", async () => {
+      await post({ products: [product("Oud Royal", null)] });
+
+      const { text } = asked();
+      expect(text).not.toContain("COLOUR OVERRIDE");
+      expect(text).not.toContain("attached image is the REAL");
     });
   });
 
