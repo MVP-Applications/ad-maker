@@ -1,14 +1,17 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useImperativeHandle, useRef, useState } from "react";
 import {
   ArrowRightIcon,
+  AtIcon,
   BoltIcon,
   CheckIcon,
   ChevronDown,
   CloseIcon,
   DownloadIcon,
   GlobeIcon,
+  LinkIcon,
+  MoreIcon,
   ImageIcon,
   PanelIcon,
   PencilIcon,
@@ -38,6 +41,7 @@ import {
   insertMention,
   matchProducts,
   mentionedIn,
+  nameProductAt,
   type ActiveMention,
 } from "@/lib/mentions";
 import { describeColor } from "@/lib/generate/colors";
@@ -1916,6 +1920,8 @@ function Studio({ s }: { s: StudioController }) {
   const edgeReached = useLeftEdgeReach(!railOpen);
   const sideBySide = useSideBySide();
   const busy = made.some((c) => c.status === "loading");
+  /** So the panel can name a Product into the box without owning its caret. */
+  const composer = useRef<ComposerHandle>(null);
 
   // Object URLs are owned here, so they are released when the screen goes.
   useEffect(
@@ -2010,6 +2016,7 @@ function Studio({ s }: { s: StudioController }) {
             products={"products" in s ? s.products : []}
             onClose={() => setRailOpen(false)}
             onEdit={() => setEditing(true)}
+            onName={(product) => composer.current?.name(product)}
           />
         </div>
       </div>
@@ -2064,6 +2071,7 @@ function Studio({ s }: { s: StudioController }) {
         </div>
 
         <Composer
+          handle={composer}
           onGenerate={() => void compose()}
           busy={busy}
           busyLabel="Generating…"
@@ -2230,18 +2238,186 @@ function useLeftEdgeReach(active: boolean, within = 72): boolean {
 }
 
 /** The brand, kept beside the work rather than on top of it. */
+/**
+ * The menu one product row opens, positioned against the row's own button.
+ *
+ * Fixed rather than absolute: the list it belongs to scrolls, and a menu
+ * positioned inside a scrolling box is clipped by it the moment it is longer
+ * than the row that opened it — which is always.
+ */
+function ProductRowMenu({
+  anchor,
+  onName,
+  onShow,
+  onClose,
+}: {
+  anchor: DOMRect;
+  onName: () => void;
+  onShow: () => void;
+  onClose: () => void;
+}) {
+  const WIDTH = 168;
+  const HEIGHT = 76;
+  // Right-aligned to the button, and flipped above it near the bottom of the
+  // window, where a menu opening downward would open off the end of it.
+  const left = Math.max(8, anchor.right - WIDTH);
+  const below = anchor.bottom + 6;
+  const top = below + HEIGHT > window.innerHeight ? anchor.top - HEIGHT - 6 : below;
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const item =
+    "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] text-[#c9c7c2] transition hover:bg-white/[0.08] hover:text-[#f4f2ef]";
+
+  return (
+    <>
+      {/* Catches the press that dismisses, so a click elsewhere closes the menu
+          instead of landing on whatever it was over. */}
+      <div className="fixed inset-0 z-40" onPointerDown={onClose} />
+      <div
+        role="menu"
+        style={{ top, left, width: WIDTH }}
+        className="fixed z-50 animate-sheet-in rounded-[12px] border border-white/[0.14] bg-[#151517] p-1 shadow-[0_18px_50px_-24px_rgba(0,0,0,0.9)]"
+      >
+        <button type="button" role="menuitem" onClick={onName} className={item}>
+          <AtIcon className="size-3.5 shrink-0 text-[#6f6f78]" />
+          Mention in prompt
+        </button>
+        <button type="button" role="menuitem" onClick={onShow} className={item}>
+          <ImageIcon className="size-3.5 shrink-0 text-[#6f6f78]" />
+          Show product
+        </button>
+      </div>
+    </>
+  );
+}
+
+/**
+ * One Product, at the size the shop photographs it.
+ *
+ * The panel's row is 28px of thumbnail and a truncated name, which is enough to
+ * pick between products already known and not enough to recognise one. This is
+ * the same entry with nothing left out.
+ */
+function ProductSheet({
+  product,
+  onName,
+  onClose,
+}: {
+  product: Product;
+  onName: () => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={product.name}
+      className="fixed inset-0 z-50 grid place-items-center p-5"
+    >
+      <div
+        className="absolute inset-0 animate-fade-in bg-black/70 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <div className="animate-sheet-in relative flex w-full max-w-sm flex-col overflow-hidden rounded-2xl border border-white/[0.14] bg-[#151517] shadow-2xl">
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute right-2.5 top-2.5 z-10 grid size-8 place-items-center rounded-lg bg-black/40 text-white/70 backdrop-blur-sm transition hover:bg-black/60 hover:text-white"
+        >
+          <CloseIcon />
+        </button>
+
+        {/* Light behind the picture, not dark: a shop photographs its articles
+            on white, and a cut-out on a dark panel loses its own edges. */}
+        <div className="logo-light grid aspect-square w-full place-items-center overflow-hidden">
+          {product.imageUrl ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={product.imageUrl}
+              alt={product.name}
+              className="size-full object-contain"
+            />
+          ) : (
+            <span className="text-[12px] text-zinc-500">No photograph</span>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-3 p-4">
+          <div className="min-w-0">
+            <h2 className="text-[15px] leading-snug text-[#f4f2ef]">
+              {product.name}
+            </h2>
+            {product.price !== null && (
+              <p className="mt-1 text-[13px] text-[#8b8b93]">
+                {product.currency} {product.price}
+              </p>
+            )}
+          </div>
+
+          {product.description && (
+            <p className="studio-scroll max-h-24 overflow-y-auto pr-1 text-[12px] leading-relaxed text-[#8b8b93]">
+              {product.description}
+            </p>
+          )}
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onName}
+              className="flex-1 rounded-lg bg-[#6d28d9] px-3 py-2 text-[12.5px] font-medium text-white transition hover:bg-[#7c3aed]"
+            >
+              Mention in prompt
+            </button>
+            {product.url && (
+              // The shop's own page, opened by the person rather than for them.
+              <a
+                href={product.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={product.url}
+                className="grid size-9 shrink-0 place-items-center rounded-lg border border-white/[0.14] text-[#8b8b93] transition hover:border-white/25 hover:text-[#f4f2ef]"
+              >
+                <LinkIcon className="size-4" />
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BrandRail({
   brief: b,
   submittedDomain,
   products,
   onClose,
   onEdit,
+  onName,
 }: {
   brief: AdBrief;
   submittedDomain: string;
   products: readonly Product[];
   onClose: () => void;
   onEdit: () => void;
+  /** Writes the Product's name into the prompt box, at whatever it is doing. */
+  onName: (product: Product) => void;
 }) {
   /**
    * Searched because a shop runs to hundreds — nouvona.com publishes 107 and
@@ -2250,6 +2426,18 @@ function BrandRail({
    */
   const [query, setQuery] = useState("");
   const found = matchProducts(products, query, products.length);
+
+  /** The row whose menu is open, with the button it has to sit against. */
+  const [menu, setMenu] = useState<{ product: Product; anchor: DOMRect } | null>(
+    null,
+  );
+  const [showing, setShowing] = useState<Product | null>(null);
+
+  const name = (product: Product) => {
+    onName(product);
+    setMenu(null);
+    setShowing(null);
+  };
 
   return (
     <aside className="studio-panel flex h-full w-full shrink-0 flex-col border-b border-white/[0.14] lg:h-[100dvh] lg:w-[292px] lg:border-b-0 lg:border-r">
@@ -2417,12 +2605,12 @@ function BrandRail({
             {found.map((product) => (
               <li key={product.name}>
                 <div
-                  // The affordance leads: seeing a Product here is what tells a
-                  // person it can be typed into the prompt at all.
-                  title={`Type @ in the prompt to name this — ${
-                    product.description || product.name
+                  title={product.description || product.name}
+                  className={`group flex items-center gap-2 rounded-lg px-1.5 py-1 transition ${
+                    menu?.product.name === product.name
+                      ? "bg-white/[0.05]"
+                      : "hover:bg-white/[0.05]"
                   }`}
-                  className="flex items-center gap-2 rounded-lg px-1.5 py-1 transition hover:bg-white/[0.05]"
                 >
                   <span className="logo-light size-7 shrink-0 overflow-hidden rounded-[5px]">
                     {product.imageUrl && (
@@ -2445,12 +2633,61 @@ function BrandRail({
                       </span>
                     )}
                   </span>
+
+                  {/* Shown on hover, and whenever it is focused or open: an
+                      affordance only a mouse can find is one a keyboard cannot
+                      reach at all. */}
+                  <button
+                    type="button"
+                    aria-label={`Actions for ${product.name}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menu?.product.name === product.name}
+                    onClick={(event) => {
+                      // Measured here rather than inside the updater below:
+                      // React runs that after the handler has returned, by
+                      // which time the event has let go of the button.
+                      const anchor =
+                        event.currentTarget.getBoundingClientRect();
+                      setMenu((was) =>
+                        was?.product.name === product.name
+                          ? null
+                          : { product, anchor },
+                      );
+                    }}
+                    className={`grid size-6 shrink-0 place-items-center rounded-md text-[#6f6f78] transition hover:bg-white/[0.09] hover:text-[#f4f2ef] focus:outline-none focus-visible:opacity-100 group-hover:opacity-100 ${
+                      menu?.product.name === product.name
+                        ? "bg-white/[0.09] text-[#f4f2ef] opacity-100"
+                        : "opacity-0"
+                    }`}
+                  >
+                    <MoreIcon className="size-3.5" />
+                  </button>
                 </div>
               </li>
             ))}
           </ul>
         )}
       </div>
+
+      {menu && (
+        <ProductRowMenu
+          anchor={menu.anchor}
+          onName={() => name(menu.product)}
+          onShow={() => {
+            setShowing(menu.product);
+            setMenu(null);
+          }}
+          onClose={() => setMenu(null)}
+        />
+      )}
+
+      {showing && (
+        <ProductSheet
+          product={showing}
+          onName={() => name(showing)}
+          onClose={() => setShowing(null)}
+        />
+      )}
     </aside>
   );
 }
@@ -2730,6 +2967,23 @@ const COMPOSER_MAX_LINES = 6;
 const COMPOSER_FALLBACK_HEIGHT = 130;
 
 /**
+ * Puts the caret where a name was just written, once React has written it.
+ *
+ * Deferred because the box still holds the old text when the handler returns —
+ * a selection set now would be measured against a sentence one name shorter.
+ * A timer rather than an animation frame: frames stop being handed out while
+ * the tab is in the background, and a caret is not a thing being painted, so a
+ * Product named just before switching away should still be waiting correctly
+ * when the person comes back.
+ */
+function placeCaret(box: React.RefObject<HTMLTextAreaElement | null>, caret: number) {
+  setTimeout(() => {
+    box.current?.focus();
+    box.current?.setSelectionRange(caret, caret);
+  }, 0);
+}
+
+/**
  * Sets the prompt box to the height of its own text, up to the cap.
  *
  * The cap is measured off the box rather than written down as a pixel count,
@@ -2783,7 +3037,19 @@ function unpicturedWarning(
     : `${model.displayName} can be shown one photograph — the other ${missed} will be described rather than pictured, so expect ${them} to be invented.`;
 }
 
+/**
+ * What the panel beside the composer can ask it to do.
+ *
+ * Naming a Product needs the caret, and the caret belongs to the box. Rather
+ * than lift the selection into the studio and keep it in step with every
+ * keystroke, the box keeps it and answers a request to write at it.
+ */
+export type ComposerHandle = {
+  name(product: Product): void;
+};
+
 function Composer({
+  handle,
   onGenerate,
   busy,
   busyLabel,
@@ -2799,6 +3065,7 @@ function Composer({
   mentioned,
   onMention,
 }: {
+  handle?: React.RefObject<ComposerHandle | null>;
   onGenerate: () => void;
   busy: boolean;
   busyLabel: string;
@@ -2831,6 +3098,39 @@ function Composer({
     if (box.current) fitComposer(box.current);
   }, [prompt]);
 
+  /** Writes a Product's name into the box, and puts the caret after it. */
+  const write = (product: Product, caret: number) => {
+    const next = nameProductAt(prompt, caret, product);
+    setPrompt(next.value);
+    onMention(product);
+    setMention(null);
+    placeCaret(box, next.caret);
+  };
+
+  useImperativeHandle(
+    handle,
+    () => ({
+      name(product) {
+        // Read off the box rather than tracked here, because a textarea keeps
+        // its selection across blur — which is the whole reason this works.
+        // Reaching the panel's menu takes focus off the box, so by now it is
+        // certainly not focused, and the caret the person left in it is still
+        // sitting exactly where they left it.
+        //
+        // Clamped because the prompt can be emptied from outside the box, by a
+        // generate, without the selection following it down.
+        const caret = Math.min(
+          box.current?.selectionStart ?? prompt.length,
+          prompt.length,
+        );
+        write(product, caret);
+      },
+    }),
+    // Rebuilt when the text changes: the handle writes into the prompt it was
+    // built with, and a stale one would name a Product into an older sentence.
+    [prompt, write],
+  );
+
   // Only what this model can actually render: the rest come back as its own
   // default shape without saying they have.
   const chosen = imageModelById(model);
@@ -2850,11 +3150,9 @@ function Composer({
     onMention(product);
     setMention(null);
     // The caret belongs after the name, not at the end of whatever follows it.
-    requestAnimationFrame(() => {
-      box.current?.focus();
-      box.current?.setSelectionRange(next.caret, next.caret);
-    });
+    placeCaret(box, next.caret);
   };
+
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (open) {

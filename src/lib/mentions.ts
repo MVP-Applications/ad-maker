@@ -85,6 +85,41 @@ export function insertMention(
 }
 
 /**
+ * Name a Product at the caret, whether or not an "@" is open there.
+ *
+ * The picker replaces the "@query" that opened it. This is for naming one from
+ * somewhere else — the panel's own list, where there is no "@" to replace and
+ * the caret is simply wherever the person last left it. It still defers to an
+ * open "@": naming a Product while half a query sits under the caret should
+ * finish that query rather than leave it stranded beside the answer.
+ */
+export function nameProductAt(
+  value: string,
+  caret: number,
+  product: Product,
+): { value: string; caret: number } {
+  const open = activeMention(value, caret);
+  // A query still being typed has no space on the end. One that does is a name
+  // already finished — most often one this very function just wrote, since it
+  // leaves the caret directly after "@Name ". Replacing that would delete the
+  // last Product named in order to name the next one. Product names contain
+  // spaces, so this cannot be a rule about spaces inside the query, only about
+  // the one that ends it.
+  if (open && !/\s$/.test(open.query)) return insertMention(value, open, product);
+
+  const before = value.slice(0, caret);
+  const after = value.slice(caret);
+  // Spaced off what is already there, but only where there is not a space
+  // already: a name welded onto the last word is a different word, and two
+  // spaces where the caret was is a gap the person has to go back and close.
+  const lead = !before || /\s$/.test(before) ? "" : " ";
+  const trail = /^\s/.test(after) ? "" : " ";
+  const token = `${lead}@${product.name}${trail}`;
+
+  return { value: before + token + after, caret: caret + token.length };
+}
+
+/**
  * The Products still named in the text.
  *
  * The picker records what was chosen, but the text is what the person sees and

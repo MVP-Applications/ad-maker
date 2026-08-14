@@ -5,6 +5,7 @@ import {
   insertMention,
   matchProducts,
   mentionedIn,
+  nameProductAt,
 } from "./mentions";
 
 const product = (name: string): Product => ({
@@ -137,5 +138,54 @@ describe("what the request finally carries", () => {
     expect(
       mentionedIn(text, [CATALOGUE[3], CATALOGUE[0]]).map(({ name }) => name),
     ).toEqual([CATALOGUE[3].name, CATALOGUE[0].name]);
+  });
+});
+
+// Naming one from the panel's list rather than by typing "@": there is no
+// query under the caret to replace, and the caret is wherever it was left.
+describe("naming a Product from outside the prompt", () => {
+  const ROYAL = CATALOGUE[3];
+
+  test("names it at the caret, spaced off the words either side", () => {
+    const { value, caret } = nameProductAt("an ad for on marble", 10, ROYAL);
+
+    expect(value).toBe("an ad for @Royal Oud Reserve on marble");
+    expect(value.slice(caret)).toBe("on marble");
+  });
+
+  test("adds no space where there is one already", () => {
+    expect(nameProductAt("", 0, ROYAL).value).toBe("@Royal Oud Reserve ");
+    expect(nameProductAt("an ad for ", 10, ROYAL).value).toBe(
+      "an ad for @Royal Oud Reserve ",
+    );
+  });
+
+  test("leaves the caret after the name it just wrote", () => {
+    const { value, caret } = nameProductAt("an ad for", 9, ROYAL);
+
+    expect(value.slice(0, caret)).toBe("an ad for @Royal Oud Reserve ");
+  });
+
+  // Half a query under the caret is a question the person started; answering it
+  // beside itself would leave "@Roy" stranded next to the name it asked for.
+  test("finishes an @ query the caret is already inside", () => {
+    const { value } = nameProductAt("an ad for @Roy", 14, ROYAL);
+
+    expect(value).toBe("an ad for @Royal Oud Reserve ");
+  });
+
+  // Names contain spaces, so a query cannot be judged finished by having one
+  // inside it — only by ending in one.
+  test("keeps searching a multi-word query rather than naming beside it", () => {
+    const { value } = nameProductAt("an ad for @Royal Oud", 20, ROYAL);
+
+    expect(value).toBe("an ad for @Royal Oud Reserve ");
+  });
+
+  test("names a second Product without disturbing the first", () => {
+    const once = nameProductAt("", 0, CATALOGUE[0]);
+    const twice = nameProductAt(once.value, once.caret, ROYAL);
+
+    expect(mentionedIn(twice.value, [CATALOGUE[0], ROYAL])).toHaveLength(2);
   });
 });
