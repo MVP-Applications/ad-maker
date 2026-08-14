@@ -72,8 +72,12 @@ describe("the art director", () => {
   beforeEach(() => {
     mocks.generateObject.mockReset();
     mocks.generateObject.mockResolvedValue({
-      object: {
-        adType: "product_hero",
+      object: { concepts: Array.from({ length: 6 }, () => concept()) },
+    });
+  });
+
+  const concept = () => ({
+        adType: "product_hero" as const,
         direction: "sculptural_hero",
         lighting: "split_light",
         lens: "portrait_85",
@@ -100,20 +104,18 @@ describe("the art director", () => {
         layout: "poster_stack",
         blocks: [
           {
-            role: "headline",
+            role: "headline" as const,
             text: "Wear the night",
             sizePercent: 14,
-            weight: "bold",
-            case: "as_written",
-            placement: "top_left",
+            weight: "bold" as const,
+            case: "as_written" as const,
+            placement: "top_left" as const,
           },
         ],
-      },
-    });
   });
 
   it("returns the plan, corrected by the rules it may not break", async () => {
-    const plan = await directArtwork(
+    const [plan] = await directArtwork(
       context({ catalog: [product("Oud Royal")] }), []);
 
     expect(plan.adType).toBe("product_hero");
@@ -171,7 +173,7 @@ describe("the art director", () => {
   });
 
   it("returns the craft it chose, ready to splice", async () => {
-    const plan = await directArtwork(context(), []);
+    const [plan] = await directArtwork(context(), []);
 
     expect(plan.craft).toEqual({
       lighting: "split_light",
@@ -224,9 +226,9 @@ describe("the art director", () => {
 
     it("carries the appearance it read back into the plan", async () => {
       mocks.generateObject.mockResolvedValue({
-        object: {
-          ...mocks.generateObject.mock.results,
-          adType: "product_hero",
+        object: { concepts: [{
+          ...concept(),
+          adType: "product_hero" as const,
           direction: "sculptural_hero",
           lighting: null,
           lens: null,
@@ -258,10 +260,10 @@ describe("the art director", () => {
           typeface: "Inter",
           layout: "poster_stack",
           blocks: [],
-        },
+        }] },
       });
 
-      const plan = await directArtwork(
+      const [plan] = await directArtwork(
         context({ named: [product("Oud Royal")] }),
         [seen("Oud Royal", 1)],
       );
@@ -315,7 +317,7 @@ describe("the art director", () => {
   it("falls back rather than fail when the call does not come back", async () => {
     mocks.generateObject.mockRejectedValue(new Error("gateway down"));
 
-    const plan = await directArtwork(
+    const [plan] = await directArtwork(
       context({ named: [product("Bella Nera")] }), []);
 
     expect(plan.heroProducts).toEqual(["Bella Nera"]);

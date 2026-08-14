@@ -36,11 +36,17 @@ import {
   type ArtContext,
   type RawArtPlan,
 } from "@/lib/generate/art-plan";
-import { POST } from "./route";
+import { POST, type ComposeEvent as Event } from "./route";
 
-/** Answer the next compose with this plan, corrected the way the director's is. */
+/**
+ * Answer the next compose with a set holding this one plan.
+ *
+ * A set of one rather than six: almost every test below is about how a single
+ * concept becomes a prompt, and six copies of it would only make the assertions
+ * count. The tests that are about the set say so and hand over six.
+ */
 const directs = (plan: Partial<RawArtPlan>) =>
-  mocks.directArtwork.mockImplementation(async (context: ArtContext) =>
+  mocks.directArtwork.mockImplementation(async (context: ArtContext) => [
     enforceArtPlan(
       {
         adType: "product_hero",
@@ -78,15 +84,28 @@ const directs = (plan: Partial<RawArtPlan>) =>
       },
       context,
     ),
-  );
+  ]);
 
 /** One pixel of PNG, which is all the route ever looks at. */
 const PIXEL = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64");
 
 const photo = (byte: number) => ({ bytes: Uint8Array.from([byte]) });
 
-const post = (body: Record<string, unknown>) =>
-  POST(
+/**
+ * The set streams, so a response is not finished when it arrives. Every test
+ * drains it before asserting — otherwise the renders have not run yet.
+ */
+const drain = async (response: Response): Promise<Event[]> => {
+  if (!response.body) return [];
+  const text = await new Response(response.body).text();
+  return text
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line) as Event);
+};
+
+const post = async (body: Record<string, unknown>) => {
+  const response = await POST(
     new Request("https://branda.test/api/compose", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -98,6 +117,12 @@ const post = (body: Record<string, unknown>) =>
       }),
     }),
   );
+  const events =
+    response.headers.get("content-type") === "application/x-ndjson"
+      ? await drain(response)
+      : [];
+  return Object.assign(response, { events });
+};
 
 /** What the model was actually asked for, on the one call the route makes. */
 const asked = () => {
@@ -126,9 +151,9 @@ describe("POST /api/compose", () => {
     mocks.fetchPublicRaster.mockReset();
     mocks.hasGatewayConfiguration.mockReturnValue(true);
     mocks.directArtwork.mockReset();
-    mocks.directArtwork.mockImplementation(async (context: ArtContext) =>
+    mocks.directArtwork.mockImplementation(async (context: ArtContext) => [
       fallbackArtPlan(context),
-    );
+    ]);
     mocks.generateImage.mockResolvedValue({
       image: { base64: PIXEL, mediaType: "image/png" },
     });
@@ -211,7 +236,9 @@ describe("POST /api/compose", () => {
       });
 
       expect(response.status).toBe(200);
-      expect(response.headers.get("content-type")).toBe("image/jpeg");
+      // The picture's own type travels in its event; the response is the stream.
+      const image = response.events.find((e) => e.type === "image");
+      expect(image).toMatchObject({ index: 0, mediaType: "image/jpeg" });
       // The picture goes by address, not by bytes, and the shape travels too.
       expect(mocks.falEditImage).toHaveBeenCalledTimes(1);
       const [request] = mocks.falEditImage.mock.calls[0];
@@ -576,29 +603,42 @@ describe("POST /api/compose", () => {
       ]);
     });
 
-    it("hands the craft back so the next image can differ from this one", async () => {
+    it("hands the craft back so the next set can differ from this one", async () => {
       directs({ direction: "kinetic", lighting: "split_light", finish: "halation_bloom" });
 
-      const response = await post({});
-      expect(decodeURIComponent(response.headers.get("X-Ad-Craft") ?? "")).toBe(
-        "split_light||halation_bloom",
-      );
+      const set = (await post({})).events[0];
+      expect(set.type === "set" && set.concepts[0].craft).toEqual({
+        lighting: "split_light",
+        surface: null,
+        finish: "halation_bloom",
+      });
     });
 
     /** An agent that decides silently is one nobody can correct. */
-    it("hands its reasoning back beside the picture", async () => {
+    it("announces every concept before a single picture exists", async () => {
       directs({
         adType: "promo_offer",
         direction: "graphic_poster",
-        rationale: "الطلب يسأل عن عرض",
+        conceptName: "Frozen mid-pour",
+        idea: "الطلب يسأل عن عرض",
       });
 
       const response = await post({});
-      expect(response.headers.get("X-Ad-Type")).toBe("promo_offer");
-      expect(response.headers.get("X-Ad-Direction")).toBe("graphic_poster");
-      expect(
-        decodeURIComponent(response.headers.get("X-Ad-Rationale") ?? ""),
-      ).toBe("الطلب يسأل عن عرض");
+      const [first] = response.events;
+      expect(first).toMatchObject({
+        type: "set",
+        concepts: [
+          {
+            index: 0,
+            adType: "promo_offer",
+            family: "graphic_poster",
+            conceptName: "Frozen mid-pour",
+            idea: "الطلب يسأل عن عرض",
+          },
+        ],
+      });
+      // Announced first, so six tiles can appear before the first render lands.
+      expect(response.events[1]?.type).toBe("image");
     });
 
     /**

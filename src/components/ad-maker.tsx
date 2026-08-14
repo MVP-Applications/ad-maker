@@ -64,7 +64,8 @@ import {
   supportedRatios,
   type AspectRatio,
 } from "@/lib/generate/shape";
-import type { PriorChoice } from "@/lib/generate/art-plan";
+import { SET_SIZE, type PriorChoice } from "@/lib/generate/art-plan";
+import type { ComposeEvent } from "@/app/api/compose/route";
 import type { AdMakerController, AdSlot } from "@/hooks/use-ad-maker";
 
 type IdleController = Extract<AdMakerController, { phase: "idle" }>;
@@ -1911,43 +1912,21 @@ type Composition = {
 };
 
 /**
- * What the director decided, as it travels back: percent-encoded header values,
- * since a rationale written for an Arabic shop is not latin-1.
+ * What the director decided about one picture, in one line.
+ *
+ * The concept name leads because it is the thing worth reading — the skill's
+ * own test is whether the idea can be named in five words, so this is where a
+ * failed test becomes visible.
  */
-function directorDecision(headers: Headers): {
-  note?: string;
-  choice?: PriorChoice;
-} {
-  const read = (name: string) => {
-    const raw = headers.get(name);
-    if (!raw) return "";
-    try {
-      return decodeURIComponent(raw);
-    } catch {
-      return "";
-    }
-  };
-
-  const adType = read("X-Ad-Type");
-  const direction = read("X-Ad-Direction");
-  const label = [adType, direction]
+function conceptNote(concept: {
+  conceptName: string;
+  family: string;
+  idea: string;
+}): string | undefined {
+  const label = [concept.conceptName, concept.family.replace(/_/g, " ")]
     .filter(Boolean)
-    .map((value) => value.replace(/_/g, " "))
     .join(" · ");
-  const rationale = read("X-Ad-Rationale");
-  const [lighting, surface, finish] = read("X-Ad-Craft").split("|");
-
-  return {
-    note: [label, rationale].filter(Boolean).join(" — ") || undefined,
-    choice: direction
-      ? {
-          direction,
-          lighting: lighting || null,
-          surface: surface || null,
-          finish: finish || null,
-        }
-      : undefined,
-  };
+  return [label, concept.idea].filter(Boolean).join(" — ") || undefined;
 }
 
 function Studio({ s }: { s: StudioController }) {
@@ -1992,10 +1971,34 @@ function Studio({ s }: { s: StudioController }) {
     if (!asked) return;
     // Only the Products still named in the text: deleting a name un-mentions it.
     const products = mentionedIn(asked, named);
-    const id = Date.now();
-    setMade((was) => [{ id, prompt: asked, status: "loading" }, ...was]);
+    /**
+     * One press is a set of six now, so six tiles appear at once and the ids
+     * have to be distinct within the press as well as between presses.
+     */
+    const batch = Date.now();
+    setMade((was) => [
+      ...Array.from({ length: SET_SIZE }, (_, index) => ({
+        id: batch + index,
+        prompt: asked,
+        status: "loading" as const,
+      })),
+      ...was,
+    ]);
     setPrompt("");
     setNamed([]);
+
+    const settle = (index: number, patch: Partial<Composition>) =>
+      setMade((was) =>
+        was.map((c) => (c.id === batch + index ? { ...c, ...patch } : c)),
+      );
+    const failAll = (message: string) =>
+      setMade((was) =>
+        was.map((c) =>
+          c.id >= batch && c.id < batch + SET_SIZE && c.status === "loading"
+            ? { ...c, status: "error", message }
+            : c,
+        ),
+      );
 
     try {
       const response = await fetch("/api/compose", {
@@ -2035,37 +2038,76 @@ function Studio({ s }: { s: StudioController }) {
         }),
       });
 
-      if (!response.ok) {
+      if (!response.ok || !response.body) {
         const { error } = (await response
           .json()
-          .catch(() => ({ error: "That image failed to render." }))) as {
+          .catch(() => ({ error: "That set failed to render." }))) as {
           error?: string;
         };
-        setMade((was) =>
-          was.map((c) =>
-            c.id === id
-              ? { ...c, status: "error", message: error ?? "Failed." }
-              : c,
-          ),
-        );
+        failAll(error ?? "Failed.");
         return;
       }
 
-      const { note, choice } = directorDecision(response.headers);
-      const url = URL.createObjectURL(await response.blob());
-      setMade((was) =>
-        was.map((c) =>
-          c.id === id ? { ...c, status: "done", url, note, choice } : c,
-        ),
-      );
+      /**
+       * The set arrives as one JSON object per line: the six concepts first,
+       * then each picture as it finishes. Read line by line so a tile fills the
+       * moment its own image lands rather than when the slowest one does.
+       */
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffered = "";
+
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffered += decoder.decode(value, { stream: true });
+
+        const lines = buffered.split("\n");
+        // The last piece is whatever arrived mid-line; it waits for more bytes.
+        buffered = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let event: ComposeEvent;
+          try {
+            event = JSON.parse(line) as ComposeEvent;
+          } catch {
+            continue;
+          }
+
+          if (event.type === "set") {
+            for (const concept of event.concepts) {
+              settle(concept.index, {
+                note: conceptNote(concept),
+                choice: {
+                  direction: concept.family,
+                  lighting: concept.craft.lighting,
+                  surface: concept.craft.surface,
+                  finish: concept.craft.finish,
+                },
+              });
+            }
+          } else if (event.type === "image") {
+            const bytes = Uint8Array.from(atob(event.data), (c) =>
+              c.charCodeAt(0),
+            );
+            settle(event.index, {
+              status: "done",
+              url: URL.createObjectURL(
+                new Blob([bytes], { type: event.mediaType }),
+              ),
+            });
+          } else {
+            settle(event.index, { status: "error", message: event.message });
+          }
+        }
+      }
+
+      // A stream that ended with tiles still spinning means the connection went
+      // rather than the renders: nothing else is coming, so say so.
+      failAll("That one didn't render.");
     } catch {
-      setMade((was) =>
-        was.map((c) =>
-          c.id === id
-            ? { ...c, status: "error", message: "Couldn't reach the server." }
-            : c,
-        ),
-      );
+      failAll("Couldn't reach the server.");
     }
   };
 

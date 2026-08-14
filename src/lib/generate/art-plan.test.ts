@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  SET_SIZE,
   TEXT_BLOCK_MAX,
+  enforceArtSet,
   buildDirectedPrompt,
   enforceArtPlan,
   fallbackArtPlan,
@@ -488,6 +490,92 @@ describe("the prompt", () => {
     });
 
     expect(text.trimEnd().endsWith("KEEP IT AS PHOTOGRAPHED.")).toBe(true);
+  });
+});
+
+/**
+ * The skill's step five: vary the craft variables independently, and check it
+ * explicitly before delivering. A model asked to verify its own output will
+ * say it did, so this is the check.
+ */
+describe("the set of six", () => {
+  const identical = () => Array.from({ length: SET_SIZE }, () => plan());
+
+  it("delivers six", () => {
+    expect(enforceArtSet(identical(), context())).toHaveLength(SET_SIZE);
+  });
+
+  it("refuses to run the same family twice", () => {
+    const set = enforceArtSet(identical(), context());
+    const families = set.map(({ direction }) => direction);
+
+    expect(new Set(families).size).toBe(SET_SIZE);
+  });
+
+  it("gives every picture its own light, ground and colour relationship", () => {
+    const set = enforceArtSet(identical(), context());
+
+    for (const axis of ["lighting", "surface", "palette"] as const) {
+      const used = set.map((concept) => concept.craft[axis]);
+      expect(new Set(used).size).toBe(SET_SIZE);
+    }
+  });
+
+  /** Six ads that each earned a price tag is still a flyer. */
+  it("lets at most one of the six carry a price", () => {
+    const priceBlock = block({ role: "price", text: "SAR 450", sizePercent: 5 });
+    const set = enforceArtSet(
+      Array.from({ length: SET_SIZE }, () =>
+        plan({ adType: "promo_offer", blocks: [block(), priceBlock] }),
+      ),
+      context({ named: [product("Bella Nera")] }),
+    );
+
+    const priced = set.filter((concept) =>
+      concept.blocks.some(({ role }) => role === "price"),
+    );
+    expect(priced).toHaveLength(1);
+  });
+
+  /** One or two may carry a feeling. Six moody crops is its own failure. */
+  it("keeps most of the set saying something", () => {
+    const set = enforceArtSet(
+      Array.from({ length: SET_SIZE }, () => plan({ prominence: "implied" })),
+      context(),
+    );
+
+    expect(
+      set.filter(({ prominence }) => prominence === "implied"),
+    ).toHaveLength(2);
+  });
+
+  it("leaves a set that was already distinct alone", () => {
+    const varied = [
+      plan({ direction: "sculptural_hero", lighting: "rembrandt", surface: "seamless_paper", paletteStrategy: "mono_accent" }),
+      plan({ direction: "editorial_still_life", lighting: "window_north", surface: "linen_drape", paletteStrategy: "analogous_warm" }),
+      plan({ direction: "human_moment", lighting: "golden_hour", surface: "aged_wood", paletteStrategy: "muted_earth_metal" }),
+      plan({ direction: "surreal_conceptual", lighting: "gel_duotone", surface: "studio_infinity", paletteStrategy: "duotone_gel" }),
+      plan({ direction: "graphic_poster", lighting: "hard_flash", surface: "kraft_paper", paletteStrategy: "complementary_clash" }),
+      plan({ direction: "elemental_material", lighting: "caustics", surface: "still_water", paletteStrategy: "article_led" }),
+    ];
+
+    const set = enforceArtSet(varied, context());
+    expect(set.map(({ direction }) => direction)).toEqual([
+      "sculptural_hero",
+      "editorial_still_life",
+      "human_moment",
+      "surreal_conceptual",
+      "graphic_poster",
+      "elemental_material",
+    ]);
+    expect(set.map(({ craft }) => craft.lighting)).toEqual([
+      "rembrandt",
+      "window_north",
+      "golden_hour",
+      "gel_duotone",
+      "hard_flash",
+      "caustics",
+    ]);
   });
 });
 

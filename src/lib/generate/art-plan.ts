@@ -812,6 +812,134 @@ export function enforceArtPlan(raw: RawArtPlan, context: ArtContext): ArtPlan {
  * composer made before there was a director: the person's words, the brand's
  * name, and nothing invented.
  */
+/**
+ * Six, which is the unit the skill actually works in.
+ *
+ * Not six variations of one shot — six answers to the same brief that would look
+ * wrong beside each other. The skill's distinctness test is a property of the
+ * set rather than of any picture in it, so the set is what gets planned: one
+ * call sees all six at once and can make them differ, where six independent
+ * calls can only be told what the last one did.
+ */
+export const SET_SIZE = 6;
+
+export const artSetSchema = z.object({
+  concepts: z.array(artPlanSchema).length(SET_SIZE),
+});
+
+export type RawArtSet = z.infer<typeof artSetSchema>;
+
+/**
+ * The axes no two pictures in a set may share.
+ *
+ * Straight from the skill's step five: vary the craft variables independently,
+ * and check it explicitly before delivering. This is that check, in code,
+ * because a model asked to verify its own output will say it did.
+ */
+const SET_DISTINCT = ["lighting", "surface", "palette"] as const;
+
+const CRAFT_POOL = {
+  lighting: LIGHTING_KEYS,
+  surface: SURFACE_KEYS,
+  palette: PALETTE_STRATEGY_KEYS,
+} as const;
+
+/**
+ * How many of the six may carry a feeling instead of information.
+ *
+ * The skill allows one or two. Past that the set stops covering the essentials
+ * anywhere: six moody crops is as much a failure as six studio heroes, just a
+ * more flattering one.
+ */
+const IMPLIED_MAX = 2;
+
+/**
+ * The set, corrected to the one it is allowed to be.
+ *
+ * Each concept goes through `enforceArtPlan` on its own first — every rule about
+ * price, text and truth applies per picture regardless of what its neighbours
+ * do. What is left is the part only a set can get wrong.
+ */
+export function enforceArtSet(
+  raw: readonly RawArtPlan[],
+  context: ArtContext,
+): ArtPlan[] {
+  const plans = raw
+    .slice(0, SET_SIZE)
+    .map((concept) => enforceArtPlan(concept, context));
+
+  // A family used twice is the failure the skill names first: six variations of
+  // the same shot. Photo-safe families are preferred for the replacement, since
+  // a set advertising a photographed article is mostly photo-safe already.
+  const usedFamilies = new Set<CreativeDirectionKey>();
+  const spareFamilies = CREATIVE_DIRECTION_KEYS.filter(
+    (family) => !raw.some((concept) => concept.direction === family),
+  );
+  for (const plan of plans) {
+    if (!usedFamilies.has(plan.direction)) {
+      usedFamilies.add(plan.direction);
+      continue;
+    }
+    const spare = spareFamilies.find(
+      (family) => !usedFamilies.has(family) && isPhotoSafe(family),
+    );
+    if (!spare) continue;
+    plan.direction = spare;
+    usedFamilies.add(spare);
+  }
+
+  // Lighting, ground and colour relationship, one each across the set.
+  for (const axis of SET_DISTINCT) {
+    const used = new Set<string>();
+    for (const plan of plans) {
+      const chosen = plan.craft[axis];
+      if (chosen && !used.has(chosen)) {
+        used.add(chosen);
+        continue;
+      }
+      const spare = (CRAFT_POOL[axis] as readonly string[]).find(
+        (candidate) => !used.has(candidate),
+      );
+      if (!spare) continue;
+      plan.craft[axis] = spare;
+      used.add(spare);
+    }
+  }
+
+  /**
+   * At most one price in six, which is the skill's own ceiling, on top of the
+   * per-picture gate every concept has already passed. Six ads that each earned
+   * a price tag is still a flyer.
+   */
+  let priced = false;
+  for (const plan of plans) {
+    const hasPrice = plan.blocks.some(({ role }) => role === "price");
+    if (!hasPrice) continue;
+    if (priced) {
+      plan.blocks = plan.blocks.filter(({ role }) => role !== "price");
+      continue;
+    }
+    priced = true;
+  }
+
+  // One or two may carry a feeling. The rest have to say something.
+  let implied = 0;
+  for (const plan of plans) {
+    if (plan.prominence !== "implied") continue;
+    implied += 1;
+    if (implied > IMPLIED_MAX) plan.prominence = "present";
+  }
+
+  return plans;
+}
+
+/** Six of the plan that gets made when nothing was directed. */
+export function fallbackArtSet(context: ArtContext): ArtPlan[] {
+  const base = fallbackArtPlan(context);
+  const families = CREATIVE_DIRECTION_KEYS.filter(isPhotoSafe).slice(0, SET_SIZE);
+  return families.map((direction) => ({ ...base, direction }));
+}
+
 export function fallbackArtPlan(context: ArtContext): ArtPlan {
   const heroes = context.named.slice(0, SUBJECT_MAX);
   const willAttachPhoto =

@@ -247,29 +247,35 @@ function priorChoices(value: unknown): PriorChoice[] {
  */
 const AVOID_MAX = 4;
 
+/** One finished picture, before it is encoded for the stream. */
+type Rendered = { bytes: Uint8Array; mediaType: string };
+
 /**
- * The director's reasoning, carried back beside the picture.
+ * What travels down the stream.
  *
- * Headers rather than a JSON envelope because the body is the image itself and
- * always has been. Percent-encoded because a rationale written for an Arabic
- * shop is not latin-1, and a header that is not latin-1 throws rather than
- * degrades.
+ * `set` arrives first and carries every concept the director decided, so six
+ * tiles can appear the moment the planning call returns rather than when the
+ * first picture does. `image` and `error` then arrive in whatever order the
+ * renders finish, each addressed by the index it belongs to.
  */
-const directionHeaders = (plan: ArtPlan) => ({
-  "X-Ad-Type": encodeURIComponent(plan.adType),
-  "X-Ad-Direction": encodeURIComponent(plan.direction),
-  "X-Ad-Rationale": encodeURIComponent(plan.rationale),
-  /**
-   * The craft, so the browser can hand it back on the next compose as something
-   * not to repeat. The route holds no session — this is how one image knows
-   * what the last four looked like.
-   */
-  "X-Ad-Craft": encodeURIComponent(
-    [plan.craft.lighting, plan.craft.surface, plan.craft.finish]
-      .map((key) => key ?? "")
-      .join("|"),
-  ),
-});
+export type ComposeEvent =
+  | {
+      type: "set";
+      concepts: {
+        index: number;
+        conceptName: string;
+        family: string;
+        adType: string;
+        idea: string;
+        craft: {
+          lighting: string | null;
+          surface: string | null;
+          finish: string | null;
+        };
+      }[];
+    }
+  | { type: "image"; index: number; mediaType: string; data: string }
+  | { type: "error"; index: number; message: string };
 
 export async function POST(req: Request) {
   if (!hasGatewayConfiguration()) {
@@ -341,9 +347,9 @@ export async function POST(req: Request) {
     .slice(0, DIRECTOR_EYES);
   const looked = await loadRasters(candidates, req.signal);
 
-  let plan;
+  let plans: ArtPlan[];
   try {
-    plan = await directArtwork(
+    plans = await directArtwork(
       context,
       looked.map(({ product, raster }) => ({
         name: product.name,
@@ -354,47 +360,44 @@ export async function POST(req: Request) {
     );
   } catch {
     if (req.signal.aborted) return fail("Cancelled.", 499);
-    return fail("That image failed to render. Try again.", 502);
+    return fail("The art director could not answer. Try again.", 502);
   }
 
   /**
-   * Which Products the picture actually holds is the director's answer, not the
-   * request's: a person who named none may still get a range, and one who named
-   * three may be given a hero and two supporting articles.
+   * One render per concept, built the same way a single one always was.
+   *
+   * The photographs are loaded once for the whole set rather than per concept:
+   * six concepts about the same article want the same picture of it, and a
+   * fetch per concept would be six times the wait for nothing.
    */
-  const subjects = resolveProducts(
-    [...plan.heroProducts, ...plan.supportingProducts],
-    context,
-  ).slice(0, MENTION_MAX);
+  const render = async (plan: ArtPlan): Promise<Rendered> => {
+    const subjects = resolveProducts(
+      [...plan.heroProducts, ...plan.supportingProducts],
+      context,
+    ).slice(0, MENTION_MAX);
 
-  const photographs = await loadPhotographs(model, subjects, looked, req.signal);
-  const shown = new Set(photographs.map(({ product }) => product));
+    const photographs = await loadPhotographs(model, subjects, looked, req.signal);
+    const shown = new Set(photographs.map(({ product }) => product));
 
-  /**
-   * One article gets the Ad Run's own wording rather than a plural rewrite of
-   * it: that is the sentence with the most evidence behind it.
-   */
-  const fidelity =
-    photographs.length === 1
-      ? oneArticleFidelity(photographs[0].product.name)
-      : photographs.length > 1
-        ? manyArticlesFidelity(photographs.length)
-        : "";
+    /**
+     * One article gets the Ad Run's own wording rather than a plural rewrite of
+     * it: that is the sentence with the most evidence behind it.
+     */
+    const fidelity =
+      photographs.length === 1
+        ? oneArticleFidelity(photographs[0].product.name)
+        : photographs.length > 1
+          ? manyArticlesFidelity(photographs.length)
+          : "";
 
-  const composed = buildDirectedPrompt({
-    plan,
-    context,
-    photographed: photographs.map(({ product }) => product),
-    described: subjects.filter((product) => !shown.has(product)),
-    fidelity,
-  });
+    const composed = buildDirectedPrompt({
+      plan,
+      context,
+      photographed: photographs.map(({ product }) => product),
+      described: subjects.filter((product) => !shown.has(product)),
+      fidelity,
+    });
 
-  const headers = {
-    ...NO_STORE,
-    ...directionHeaders(plan),
-  };
-
-  try {
     /**
      * fal's editing path, for the models that reach a reference no other way.
      * The Ad Run has sent one product photograph down it since it was written,
@@ -408,22 +411,13 @@ export async function POST(req: Request) {
           path: model.reference.path,
           prompt: composed,
           imageUrls: photographs.map(({ url }) => url),
-          aspectRatio:
-            shape.kind === "aspect_ratio" ? shape.aspectRatio : "1:1",
+          aspectRatio: shape.kind === "aspect_ratio" ? shape.aspectRatio : "1:1",
         },
         req.signal,
       );
 
-      if (edited.bytes.byteLength === 0) {
-        return fail("The model returned nothing.", 502);
-      }
-
-      return new NextResponse(Buffer.from(edited.bytes), {
-        headers: {
-          "Content-Type": edited.mediaType || "image/png",
-          ...headers,
-        },
-      });
+      if (edited.bytes.byteLength === 0) throw new Error("empty render");
+      return { bytes: edited.bytes, mediaType: edited.mediaType || "image/png" };
     }
 
     const { image } = await generateImage({
@@ -450,17 +444,64 @@ export async function POST(req: Request) {
     });
 
     const bytes = Uint8Array.from(Buffer.from(image.base64, "base64"));
-    if (bytes.byteLength === 0) return fail("The model returned nothing.", 502);
+    if (bytes.byteLength === 0) throw new Error("empty render");
+    return { bytes, mediaType: image.mediaType ?? "image/png" };
+  };
 
-    return new NextResponse(Buffer.from(bytes), {
-      headers: {
-        "Content-Type": image.mediaType ?? "image/png",
-        ...headers,
-      },
-    });
-  } catch (cause) {
-    if (req.signal.aborted) return fail("Cancelled.", 499);
-    console.error("[compose] render failed:", cause);
-    return fail("That image failed to render. Try again.", 502);
-  }
+  /**
+   * The set streams rather than arriving together.
+   *
+   * Six images is a minute or more, and a person watching one spinner for a
+   * minute has no idea whether anything is happening. The concepts go first —
+   * they are decided already, and they are what fills the six tiles — then each
+   * picture as it finishes. One render failing costs its own tile and nothing
+   * else, which is the other half of why this is not one response.
+   */
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      const send = (event: ComposeEvent) =>
+        controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+
+      send({
+        type: "set",
+        concepts: plans.map((plan, index) => ({
+          index,
+          conceptName: plan.conceptName,
+          family: plan.direction,
+          adType: plan.adType,
+          idea: plan.idea,
+          craft: {
+            lighting: plan.craft.lighting,
+            surface: plan.craft.surface,
+            finish: plan.craft.finish,
+          },
+        })),
+      });
+
+      await Promise.all(
+        plans.map(async (plan, index) => {
+          try {
+            const { bytes, mediaType } = await render(plan);
+            send({
+              type: "image",
+              index,
+              mediaType,
+              data: Buffer.from(bytes).toString("base64"),
+            });
+          } catch (cause) {
+            if (req.signal.aborted) return;
+            console.error(`[compose] concept ${index} failed:`, cause);
+            send({ type: "error", index, message: "That one didn't render." });
+          }
+        }),
+      );
+
+      controller.close();
+    },
+  });
+
+  return new NextResponse(stream, {
+    headers: { "Content-Type": "application/x-ndjson", ...NO_STORE },
+  });
 }
