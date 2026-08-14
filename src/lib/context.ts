@@ -4,7 +4,12 @@ import {
   type BrandColor,
 } from "@/lib/brand-color";
 import { normalizeFontFamily } from "@/lib/font-family";
-import { productKey, withFlagships, type Product } from "@/lib/ad-run";
+import {
+  productKey,
+  withFlagships,
+  type MarketRead,
+  type Product,
+} from "@/lib/ad-run";
 import {
   AD_CATALOG_MAX,
   AD_PRODUCT_CONCEPT_MIN,
@@ -63,6 +68,8 @@ export type BrandResearch = {
   /** Tags the site publishes itself in, as the site states them. */
   languages: string[];
   products: ProductProfile[];
+  /** What the site sells and who to, when the extractor could read it. */
+  market: MarketRead | null;
 };
 
 export class BrandExtractorError extends Error {
@@ -119,6 +126,22 @@ const responseSchema = z.object({
     .object({
       tone: z.string().nullish(),
       positioning: z.string().nullish(),
+    })
+    .partial()
+    .nullish(),
+  // Sits beside `profile` rather than inside it: the extractor answers this
+  // from its own step, with its own confidence, and says so in `source`.
+  market: z
+    .object({
+      sector: z.string().nullish(),
+      niche: z.string().nullish(),
+      audience: z.string().nullish(),
+      audience_traits: z.array(z.string()).nullish(),
+      evidence: z.string().nullish(),
+      // Unknown rather than number, for the same reason a price is: a score
+      // that arrives as "0.94" should cost the read its dot, not its Brief.
+      confidence: z.unknown(),
+      source: z.string().nullish(),
     })
     .partial()
     .nullish(),
@@ -203,6 +226,51 @@ function productFrom(
     currency:
       (product.currency ?? "").trim().slice(0, AD_RUN_LIMITS.currency) || null,
     url: logoFrom(product.url ?? null),
+  };
+}
+
+/**
+ * The market read, or nothing when the extractor did not manage one.
+ *
+ * A read with no sector, niche or audience is dropped rather than carried as
+ * three empty strings: the card that shows it would otherwise appear on the
+ * review page saying nothing, which reads as a field we failed to fill rather
+ * than one the extractor never answered. The extractor's own debug UI hides
+ * the panel on the same test.
+ */
+function marketFrom(market: ExtractResponse["market"]): MarketRead | null {
+  if (!market) return null;
+
+  const trimmed = (value: string | null | undefined, max: number) =>
+    (value ?? "").trim().slice(0, max);
+
+  const sector = trimmed(market.sector, AD_RUN_LIMITS.sector);
+  const niche = trimmed(market.niche, AD_RUN_LIMITS.niche);
+  const audience = trimmed(market.audience, AD_RUN_LIMITS.audience);
+  if (!sector && !niche && !audience) return null;
+
+  const confidence = market.confidence;
+  return {
+    // The extractor writes sectors as snake_case keys; the card shows them to
+    // a person, who did not choose that spelling.
+    sector: sector.replace(/_/g, " "),
+    niche,
+    audience,
+    audienceTraits: (market.audience_traits ?? [])
+      .flatMap((trait) => {
+        const tag = trimmed(trait, AD_RUN_LIMITS.audienceTrait);
+        return tag ? [tag] : [];
+      })
+      .slice(0, AD_RUN_LIMITS.audienceTraits),
+    evidence: trimmed(market.evidence, AD_RUN_LIMITS.marketEvidence),
+    confidence:
+      typeof confidence === "number" &&
+      Number.isFinite(confidence) &&
+      confidence >= 0 &&
+      confidence <= 1
+        ? confidence
+        : null,
+    source: trimmed(market.source, AD_RUN_LIMITS.marketSource),
   };
 }
 
@@ -299,6 +367,7 @@ function researchFrom(domain: string, body: ExtractResponse): BrandResearch {
     // The whole catalog the extractor found, not the handful an Ad Run uses:
     // the person choosing a Product cannot pick one the Brief never carried.
     products,
+    market: marketFrom(body.market),
   };
 }
 

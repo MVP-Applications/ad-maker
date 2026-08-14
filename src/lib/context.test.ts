@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AD_CATALOG_MAX } from "./ad-run-policy";
+import { AD_CATALOG_MAX, AD_RUN_LIMITS } from "./ad-run-policy";
 import { BrandExtractorError, researchBrand } from "./context";
 
 const originalEndpoint = process.env.BRAND_EXTRACTOR_URL;
@@ -79,6 +79,7 @@ describe("researchBrand", () => {
         { name: "NuPhy WH80", description: "Gaming keyboard, 500-hour battery.", imageUrl: null, price: 249.95, currency: null, url: null, flagship: true },
         { name: "NuPhy Gem80", description: "TKL custom mechanical keyboard.", imageUrl: null, price: 204.95, currency: null, url: null, flagship: true },
       ],
+      market: null,
     });
   });
 
@@ -381,6 +382,80 @@ describe("researchBrand", () => {
 
     expect(research.languages).toEqual(["en", "ja", "ko"]);
     expect(research.brand.heroImageUrl).toBe("https://cdn.shopify.com/hero.jpg");
+  });
+
+  it("reads what the shop sells and who buys it", async () => {
+    vi.stubGlobal("fetch", respond(extract({
+      market: {
+        sector: "computer_accessories",
+        niche: "mechanical keyboards",
+        audience: "Gamers and programmers, mainly adults.",
+        audience_traits: ["adult gamers", " programmers ", "", "mid-income buyers"],
+        evidence: "Beat Boy, NuPhy Gem80, NuPhy Halo96",
+        confidence: 0.94,
+        source: "ai-identity",
+      },
+    })));
+
+    const research = await researchBrand("nuphy.com");
+
+    expect(research.market).toEqual({
+      // The extractor keys sectors as snake_case; a person reads the card.
+      sector: "computer accessories",
+      niche: "mechanical keyboards",
+      audience: "Gamers and programmers, mainly adults.",
+      audienceTraits: ["adult gamers", "programmers", "mid-income buyers"],
+      evidence: "Beat Boy, NuPhy Gem80, NuPhy Halo96",
+      confidence: 0.94,
+      source: "ai-identity",
+    });
+  });
+
+  it("reads no market rather than an empty one when the extract states none", async () => {
+    vi.stubGlobal("fetch", respond(extract()));
+
+    await expect(researchBrand("nuphy.com")).resolves.toMatchObject({
+      market: null,
+    });
+  });
+
+  // Three empty strings would still draw the Market card, which reads as a
+  // field we failed to fill rather than one the extractor never answered.
+  it("drops a market read that names no sector, niche or audience", async () => {
+    vi.stubGlobal("fetch", respond(extract({
+      market: { sector: "  ", niche: "", audience: null, confidence: 0.4 },
+    })));
+
+    await expect(researchBrand("nuphy.com")).resolves.toMatchObject({
+      market: null,
+    });
+  });
+
+  it("drops a confidence that is not a score rather than the market read", async () => {
+    vi.stubGlobal("fetch", respond(extract({
+      market: { niche: "mechanical keyboards", confidence: "0.94" },
+    })));
+
+    const research = await researchBrand("nuphy.com");
+
+    expect(research.market?.niche).toBe("mechanical keyboards");
+    expect(research.market?.confidence).toBeNull();
+  });
+
+  it("bounds the market read to the Ad Run limits", async () => {
+    vi.stubGlobal("fetch", respond(extract({
+      market: {
+        niche: "k".repeat(400),
+        audience: "a".repeat(900),
+        audience_traits: Array.from({ length: 40 }, (_, i) => `trait ${i}`),
+      },
+    })));
+
+    const market = (await researchBrand("nuphy.com")).market;
+
+    expect(market?.niche).toHaveLength(AD_RUN_LIMITS.niche);
+    expect(market?.audience).toHaveLength(AD_RUN_LIMITS.audience);
+    expect(market?.audienceTraits).toHaveLength(AD_RUN_LIMITS.audienceTraits);
   });
 
   // A plain slice would drop the shortlist, which is appended after the

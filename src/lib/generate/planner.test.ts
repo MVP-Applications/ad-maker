@@ -144,6 +144,7 @@ const RESEARCH: BrandResearch = {
   summary: "Stripe helps businesses accept online payments around the world.",
   languages: ["en", "fr"],
   products: PRODUCTS,
+  market: null,
 };
 
 /** The Brief the researcher builds from RESEARCH, stated rather than derived. */
@@ -165,6 +166,7 @@ const BRIEF: AdBrief = {
     { hex: "#635bff", name: "Blurple" },
     { hex: "#0a2540", name: "Navy" },
   ],
+  market: null,
 };
 
 const AD_RUN_BRIEF: AdRunBrief = { brief: BRIEF, products: PRODUCTS };

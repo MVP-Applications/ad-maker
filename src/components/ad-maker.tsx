@@ -23,6 +23,7 @@ import {
   AD_RUN_MIN_SIZE,
   productKey,
   type AdBrief,
+  type MarketRead,
   type Product,
 } from "@/lib/ad-run";
 import {
@@ -1213,6 +1214,215 @@ function Thumbnails({
   );
 }
 
+/** One trait, sized to sit in a row of them without becoming the loudest thing. */
+function TraitChip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="truncate rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] text-muted-foreground ring-1 ring-border">
+      {children}
+    </span>
+  );
+}
+
+/** "ai-identity · 0.94", or nothing when the extractor scored neither. */
+function marketProvenance(market: MarketRead): string {
+  return [market.source, market.confidence?.toFixed(2)].filter(Boolean).join(" · ");
+}
+
+/**
+ * The market read, said in the width of one card.
+ *
+ * Three columns rather than a stack: what the shop sells, who buys it, and
+ * where the read came from are three questions checked one after another, and
+ * the card is one row of a page that does not scroll.
+ */
+function MarketSummary({ market }: { market: MarketRead | null }) {
+  if (!market) {
+    return (
+      <p className="text-[12px] text-muted-foreground">
+        Not read — the extract did not say what this shop sells or who buys it.
+      </p>
+    );
+  }
+
+  const provenance = marketProvenance(market);
+
+  return (
+    <div className="flex h-full min-h-0 items-start gap-5 pr-8">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[14px] text-foreground">
+          {market.niche || market.sector || "Not stated"}
+        </p>
+        {market.niche && market.sector && (
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+            {market.sector}
+          </p>
+        )}
+      </div>
+
+      <div className="min-w-0 flex-[1.7]">
+        <p className="line-clamp-2 text-[12.5px] leading-snug text-foreground">
+          {market.audience || "Audience not stated"}
+        </p>
+        {market.audienceTraits.length > 0 && (
+          // One row, then a count: a second row of chips is what pushes the
+          // provenance line out of a card this short.
+          <div className="mt-1.5 flex items-center gap-1 overflow-hidden">
+            {market.audienceTraits.slice(0, 3).map((trait) => (
+              <TraitChip key={trait}>{trait}</TraitChip>
+            ))}
+            {market.audienceTraits.length > 3 && (
+              <span
+                title={market.audienceTraits.slice(3).join(", ")}
+                className="shrink-0 text-[10.5px] text-muted-foreground"
+              >
+                +{market.audienceTraits.length - 3}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {(market.evidence || provenance) && (
+        <div className="min-w-0 flex-1 text-right">
+          {market.evidence && (
+            <p
+              title={market.evidence}
+              className="line-clamp-2 text-[11px] leading-snug text-muted-foreground"
+            >
+              Read from {market.evidence}
+            </p>
+          )}
+          {provenance && (
+            <p className="mt-1 truncate text-[10.5px] text-muted-foreground/70">
+              {provenance}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A market read with nothing in it, for a brand the extract said nothing about. */
+const EMPTY_MARKET: MarketRead = {
+  sector: "",
+  niche: "",
+  audience: "",
+  audienceTraits: [],
+  evidence: "",
+  confidence: null,
+  source: "",
+};
+
+/**
+ * Correcting what the extract inferred.
+ *
+ * Only what the read *says* can be edited. `evidence`, `confidence` and
+ * `source` record where it came from, and a person rewriting the audience does
+ * not change which products it was inferred from or how sure the model was —
+ * so they are shown as provenance rather than offered as fields.
+ */
+function MarketEditor({
+  market,
+  onChange,
+  /** Only where this is the whole sheet: in the studio's it sits last, and a
+      field that grabs focus there scrolls the brand's name out of view. */
+  autoFocus = false,
+}: {
+  market: MarketRead | null;
+  onChange: (next: MarketRead | null) => void;
+  autoFocus?: boolean;
+}) {
+  const value = market ?? EMPTY_MARKET;
+  const provenance = marketProvenance(value);
+
+  const edit = (patch: Partial<MarketRead>) => {
+    const next = { ...value, ...patch };
+    // Emptying all three is "no market read", not a read that says nothing —
+    // the same test context.ts applies to the extract on the way in.
+    const stated = next.sector.trim() || next.niche.trim() || next.audience.trim();
+    onChange(stated ? next : null);
+  };
+
+  return (
+    <>
+      <Field label="Sector" hint="The broad category, e.g. computer accessories.">
+        <input
+          type="text"
+          autoFocus={autoFocus}
+          value={value.sector}
+          maxLength={AD_RUN_LIMITS.sector}
+          placeholder="Not stated"
+          onChange={(e) => edit({ sector: e.target.value })}
+          className="input"
+        />
+      </Field>
+
+      <Field label="Niche" hint="The narrower one within it, e.g. mechanical keyboards.">
+        <input
+          type="text"
+          value={value.niche}
+          maxLength={AD_RUN_LIMITS.niche}
+          placeholder="Not stated"
+          onChange={(e) => edit({ niche: e.target.value })}
+          className="input"
+        />
+      </Field>
+
+      <Field label="Audience" hint="Who buys, in a sentence.">
+        <textarea
+          rows={3}
+          value={value.audience}
+          maxLength={AD_RUN_LIMITS.audience}
+          placeholder="Not stated"
+          onChange={(e) => edit({ audience: e.target.value })}
+          className="input resize-none"
+        />
+      </Field>
+
+      <Field
+        label="Audience traits"
+        hint={`The same read as tags, separated by commas. At most ${AD_RUN_LIMITS.audienceTraits}.`}
+      >
+        <input
+          type="text"
+          // Split on the way out and joined on the way in, rather than held as
+          // a parsed list: splitting per keystroke eats the comma the moment
+          // it is typed, before the next trait has been started.
+          value={value.audienceTraits.join(", ")}
+          placeholder="adult gamers, programmers"
+          onChange={(e) =>
+            edit({
+              audienceTraits: e.target.value
+                .split(",")
+                .map((trait) => trait.trim().slice(0, AD_RUN_LIMITS.audienceTrait))
+                .filter(Boolean)
+                .slice(0, AD_RUN_LIMITS.audienceTraits),
+            })
+          }
+          className="input"
+        />
+      </Field>
+
+      {(value.evidence || provenance) && (
+        <div className="rounded-xl border border-border bg-muted/40 p-3">
+          <p className="text-[11px] font-medium text-foreground">
+            How this was read
+          </p>
+          {value.evidence && (
+            <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
+              Inferred from {value.evidence}.
+            </p>
+          )}
+          {provenance && (
+            <p className="mt-1 text-[11px] text-muted-foreground/70">{provenance}</p>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 /** Which card's sheet is open. */
 type DnaField =
   | "logo"
@@ -1222,7 +1432,8 @@ type DnaField =
   | "colours"
   | "headline"
   | "products"
-  | "images";
+  | "images"
+  | "market";
 
 const SHEET_COPY: Record<DnaField, { title: string; hint: string }> = {
   logo: { title: "Logo", hint: "The image handed to models that accept one." },
@@ -1238,6 +1449,10 @@ const SHEET_COPY: Record<DnaField, { title: string; hint: string }> = {
   images: {
     title: "Images",
     hint: "Every photograph the extract carries, hero shot first.",
+  },
+  market: {
+    title: "Market",
+    hint: "What the shop sells and who buys it. Inferred, not stated — so this is the field most worth reading twice.",
   },
 };
 
@@ -1286,9 +1501,18 @@ function BrandDna({ s }: { s: DnaController }) {
         </p>
       </div>
 
-      {/* 4x4 exactly: every cell is spoken for, so the varied card sizes still
-          resolve into one rectangle instead of a ragged last row. */}
-      <div className="mt-3 grid min-h-0 flex-1 grid-cols-4 grid-rows-4 gap-2.5">
+      {/* 4x5 exactly: every cell is spoken for, so the varied card sizes still
+          resolve into one rectangle instead of a ragged last row. Market takes
+          the whole last row — it is the only card carrying a sentence and a
+          row of tags at once, and half a row clamps the sentence to nothing.
+
+          The rows have a floor rather than dividing the page five ways. Five
+          equal rows fit a tall window and cut the Colours, Typography and
+          Market cards off partway down a laptop's, and a card whose last line
+          is silently missing is worse than one reached by scrolling: the point
+          of this page is that a wrong field can be spotted. Above roughly
+          780px of viewport nothing scrolls and this reads exactly as before. */}
+      <div className="studio-scroll mt-3 grid min-h-0 flex-1 grid-cols-4 grid-rows-[repeat(5,minmax(7rem,1fr))] gap-2.5 overflow-y-auto pr-1">
         <DnaCard
           label="Logo"
           className="col-span-2 row-span-2"
@@ -1443,6 +1667,15 @@ function BrandDna({ s }: { s: DnaController }) {
         >
           <Thumbnails urls={s.images} total={s.images.length} alt="" />
         </DnaCard>
+
+        <DnaCard
+          label="Market"
+          className="col-span-4"
+          onEdit={() => open("market")}
+          editLabel="Edit the market read"
+        >
+          <MarketSummary market={b.market} />
+        </DnaCard>
       </div>
 
       {editing && (
@@ -1580,6 +1813,14 @@ function BrandDna({ s }: { s: DnaController }) {
 
           {editing === "images" && (
             <ImagesSheet images={s.images} heroImageUrl={b.heroImageUrl} />
+          )}
+
+          {editing === "market" && (
+            <MarketEditor
+              market={draft.market}
+              onChange={(market) => patch({ market })}
+              autoFocus
+            />
           )}
 
           {editing === "headline" && (
@@ -2056,6 +2297,43 @@ function BrandRail({
           </p>
         )}
 
+        {/* Who the ads are for, under the look they are made in. The niche
+            names the shop and the traits name its buyers; the audience
+            sentence is the tooltip, because this rail is a column and that
+            sentence is what turns it into a paragraph. */}
+        {b.market && (
+          <div className="space-y-1.5" title={b.market.audience || undefined}>
+            {(b.market.niche || b.market.sector) && (
+              <p className="truncate text-[11px] text-[#8b8b93]">
+                {b.market.niche || b.market.sector}
+                {b.market.niche && b.market.sector && (
+                  <span className="text-[#6f6f78]"> · {b.market.sector}</span>
+                )}
+              </p>
+            )}
+            {b.market.audienceTraits.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1">
+                {b.market.audienceTraits.slice(0, 3).map((trait) => (
+                  <span
+                    key={trait}
+                    className="truncate rounded-[4px] bg-white/[0.06] px-1.5 py-0.5 text-[9.5px] text-[#8b8b93]"
+                  >
+                    {trait}
+                  </span>
+                ))}
+                {b.market.audienceTraits.length > 3 && (
+                  <span
+                    title={b.market.audienceTraits.slice(3).join(", ")}
+                    className="text-[10px] text-[#6f6f78]"
+                  >
+                    +{b.market.audienceTraits.length - 3}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center gap-1">
           {b.languages.slice(0, 3).map((tag) => (
             <span
@@ -2254,6 +2532,11 @@ function BrandSheet({
             className="input resize-none"
           />
         </Field>
+
+        <MarketEditor
+          market={draft.market}
+          onChange={(market) => patch({ market })}
+        />
 
         <button
           type="button"
