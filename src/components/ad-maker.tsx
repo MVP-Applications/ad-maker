@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   ArrowRightIcon,
   BoltIcon,
   CheckIcon,
+  ChevronDown,
   CloseIcon,
   DownloadIcon,
   GlobeIcon,
@@ -2959,6 +2960,20 @@ function Composer({
   );
 }
 
+/**
+ * The composer's own select.
+ *
+ * Not a native one. `<select>` hands its list to the platform's widget, which
+ * arrives as a white sheet in the system font at the system size, over the
+ * darkest panel on the page — and styling it is not on offer: `option`
+ * backgrounds are honoured by some browsers, ignored by others, and the menu
+ * itself is drawn outside the page entirely. So the one surface the composer
+ * opens over itself was the one surface the app had no say in.
+ *
+ * This is the listbox pattern rather than a div that happens to open: focus
+ * stays on the button and the keys land there, so the list needs no tab stop
+ * of its own and closing always returns the caret somewhere sensible.
+ */
 function ComposerSelect({
   label,
   value,
@@ -2970,21 +2985,139 @@ function ComposerSelect({
   onChange: (next: string) => void;
   options: readonly { value: string; label: string }[];
 }) {
+  const listId = useId();
+  const [open, setOpen] = useState(false);
+  const selected = Math.max(
+    options.findIndex((option) => option.value === value),
+    0,
+  );
+  /** Where the keys are, which is only the same as the choice until they move. */
+  const [active, setActive] = useState(selected);
+  const root = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+
+  const show = () => {
+    setActive(selected);
+    setOpen(true);
+  };
+  const choose = (index: number) => {
+    onChange(options[index].value);
+    setOpen(false);
+  };
+
+  // Pointer down rather than click: a menu that survives until the mouse comes
+  // back up stays open under whatever was just pressed somewhere else.
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [open]);
+
+  // The list is short enough to fit today and capped in case a model list is
+  // not, so the option the keys are on has to be able to bring itself in.
+  useEffect(() => {
+    if (!open) return;
+    list.current
+      ?.querySelector<HTMLElement>('[data-active="true"]')
+      ?.scrollIntoView({ block: "nearest" });
+  }, [open, active]);
+
+  const onKeyDown = (event: React.KeyboardEvent) => {
+    const step = (by: number) => {
+      event.preventDefault();
+      if (!open) return show();
+      setActive((was) => (was + by + options.length) % options.length);
+    };
+
+    if (event.key === "ArrowDown") return step(1);
+    if (event.key === "ArrowUp") return step(-1);
+    if (event.key === "Home" && open) {
+      event.preventDefault();
+      return setActive(0);
+    }
+    if (event.key === "End" && open) {
+      event.preventDefault();
+      return setActive(options.length - 1);
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      return open ? choose(active) : show();
+    }
+    if (event.key === "Escape" && open) {
+      // Stopped here: the composer treats Escape as "close the @ list", and
+      // one key press should not dismiss two things at once.
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+    }
+    // Tab is left alone. Moving on closes the menu, which is what leaving means.
+    if (event.key === "Tab") setOpen(false);
+  };
+
   return (
-    <label className="hidden items-center gap-1 rounded-lg border border-white/[0.1] px-2 py-1 text-[11px] transition hover:border-white/20 sm:inline-flex">
-      <span className="text-[#6f6f78]">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="cursor-pointer bg-transparent text-[#c9c7c2] outline-none [&>option]:bg-[#151517]"
+    <div ref={root} className="relative hidden sm:block">
+      <button
+        type="button"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        aria-label={`${label} — ${options[selected]?.label ?? value}`}
+        onClick={() => (open ? setOpen(false) : show())}
+        onKeyDown={onKeyDown}
+        className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] transition focus:outline-none focus-visible:border-white/40 ${
+          open ? "border-white/25 bg-white/[0.05]" : "border-white/[0.1] hover:border-white/20"
+        }`}
       >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
+        <span className="text-[#6f6f78]">{label}</span>
+        <span className="text-[#c9c7c2]">{options[selected]?.label ?? value}</span>
+        <ChevronDown
+          className={`size-3 text-[#6f6f78] transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {open && (
+        // Upward: the composer sits on the bottom edge of the window, so a
+        // list that opened downward would open off the end of it.
+        <ul
+          ref={list}
+          id={listId}
+          role="listbox"
+          aria-label={label}
+          className="studio-scroll absolute bottom-full left-0 z-30 mb-1.5 max-h-64 min-w-full overflow-y-auto rounded-[12px] border border-white/[0.14] bg-[#151517] py-1 shadow-[0_18px_50px_-24px_rgba(0,0,0,0.9)]"
+        >
+          {options.map((option, index) => (
+            <li key={option.value}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={index === selected}
+                data-active={index === active}
+                // Mouse down, not click: the button below must not take focus
+                // off the trigger before the choice is made against it.
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  choose(index);
+                }}
+                onMouseEnter={() => setActive(index)}
+                className={`flex w-full items-center gap-1.5 whitespace-nowrap px-2.5 py-1.5 text-left text-[12px] transition ${
+                  index === active ? "bg-white/[0.08]" : ""
+                } ${index === selected ? "text-[#f4f2ef]" : "text-[#c9c7c2]"}`}
+              >
+                {/* A reserved slot rather than a conditional icon, so the
+                    labels do not shift sideways as the choice moves. */}
+                <span className="grid w-3.5 shrink-0 place-items-center">
+                  {index === selected && <CheckIcon className="size-3" />}
+                </span>
+                {option.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
