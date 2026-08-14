@@ -2852,7 +2852,9 @@ function Composer({
             <p className="border-b border-white/[0.1] px-3 py-1.5 text-[10px] uppercase tracking-[0.13em] text-[#6f6f78]">
               {mention?.query ? `Products matching “${mention.query}”` : "Your products"}
             </p>
-            <ul className="studio-scroll max-h-64 overflow-y-auto py-1">
+            {/* Inset rows, for the same reason the Model and Ratio menus have
+                them: a full-width highlight cannot follow the panel's corner. */}
+            <ul className="studio-scroll max-h-64 overflow-y-auto p-1">
               {matches.map((product, index) => (
                 <li key={product.name}>
                   <button
@@ -2864,7 +2866,7 @@ function Composer({
                       choose(product);
                     }}
                     onMouseEnter={() => setHighlighted(index)}
-                    className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition ${
+                    className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition ${
                       index === highlighted ? "bg-white/[0.08]" : ""
                     }`}
                   >
@@ -3086,7 +3088,13 @@ function ComposerSelect({
           id={listId}
           role="listbox"
           aria-label={label}
-          className="studio-scroll absolute bottom-full left-0 z-30 mb-1.5 max-h-64 min-w-full overflow-y-auto rounded-[12px] border border-white/[0.14] bg-[#151517] py-1 shadow-[0_18px_50px_-24px_rgba(0,0,0,0.9)]"
+          // p-1 with rounded rows inside, rather than a padded list of
+          // full-width ones: a highlight that runs to the panel's edge cannot
+          // follow its corner, so hovering the first or last option drew a
+          // straight line across a rounded end. Inset by the padding it never
+          // reaches the corner to fight with it. The row's radius is the
+          // panel's less that padding, so the two curves stay concentric.
+          className="studio-scroll absolute bottom-full left-0 z-30 mb-1.5 max-h-64 min-w-full origin-bottom animate-sheet-in overflow-y-auto rounded-[12px] border border-white/[0.14] bg-[#151517] p-1 shadow-[0_18px_50px_-24px_rgba(0,0,0,0.9)]"
         >
           {options.map((option, index) => (
             <li key={option.value}>
@@ -3102,7 +3110,7 @@ function ComposerSelect({
                   choose(index);
                 }}
                 onMouseEnter={() => setActive(index)}
-                className={`flex w-full items-center gap-1.5 whitespace-nowrap px-2.5 py-1.5 text-left text-[12px] transition ${
+                className={`flex w-full items-center gap-2 whitespace-nowrap rounded-lg px-2 py-1.5 text-left text-[12px] transition ${
                   index === active ? "bg-white/[0.08]" : ""
                 } ${index === selected ? "text-[#f4f2ef]" : "text-[#c9c7c2]"}`}
               >
