@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRightIcon,
   BoltIcon,
@@ -31,6 +31,13 @@ import {
   parseColorInput,
   type BrandColor,
 } from "@/lib/brand-color";
+import {
+  activeMention,
+  insertMention,
+  matchProducts,
+  mentionedIn,
+  type ActiveMention,
+} from "@/lib/mentions";
 import { describeColor } from "@/lib/generate/colors";
 import { directionByKey } from "@/lib/generate/directions";
 import {
@@ -1624,6 +1631,11 @@ function Studio({ s }: { s: StudioController }) {
   const [model, setModel] = useState<ImageModelId>(IMAGE_MODELS[0].id);
   const [aspectRatio, setAspectRatio] = useState("1:1");
   const [made, setMade] = useState<readonly Composition[]>([]);
+  /**
+   * Every Product named so far. The text stays the source of truth — this is
+   * only how a name typed in the box is matched back to its photograph.
+   */
+  const [named, setNamed] = useState<readonly Product[]>([]);
   const [railOpen, setRailOpen] = useState(true);
   const [editing, setEditing] = useState(false);
   const edgeReached = useLeftEdgeReach(!railOpen);
@@ -1641,9 +1653,12 @@ function Studio({ s }: { s: StudioController }) {
   const compose = async () => {
     const asked = prompt.trim();
     if (!asked) return;
+    // Only the Products still named in the text: deleting a name un-mentions it.
+    const products = mentionedIn(asked, named);
     const id = Date.now();
     setMade((was) => [{ id, prompt: asked, status: "loading" }, ...was]);
     setPrompt("");
+    setNamed([]);
 
     try {
       const response = await fetch("/api/compose", {
@@ -1657,6 +1672,7 @@ function Studio({ s }: { s: StudioController }) {
           colorA: s.brief.colorA,
           colorB: s.brief.colorB,
           fontFamily: s.brief.fontFamily,
+          products,
         }),
       });
 
@@ -1697,6 +1713,7 @@ function Studio({ s }: { s: StudioController }) {
         <BrandRail
           brief={s.brief}
           submittedDomain={s.submittedDomain}
+          products={s.products}
           onClose={() => setRailOpen(false)}
           footer={
             <button
@@ -1758,13 +1775,19 @@ function Studio({ s }: { s: StudioController }) {
           busy={busy}
           busyLabel="Generating…"
           action="Generate"
-          note="Enter to generate · the brand's name, colours and typeface go with every prompt"
+          note="Enter to generate · type @ to name a product · the brand's name, colours and typeface go with every prompt"
           prompt={prompt}
           setPrompt={setPrompt}
           model={model}
           setModel={setModel}
           aspectRatio={aspectRatio}
           setAspectRatio={setAspectRatio}
+          products={s.products}
+          onMention={(product) =>
+            setNamed((was) =>
+              was.some((p) => p.name === product.name) ? was : [...was, product],
+            )
+          }
         />
       </main>
 
@@ -1889,14 +1912,81 @@ function useLeftEdgeReach(active: boolean, within = 72): boolean {
   return near;
 }
 
+/**
+ * The catalogue, beside the box that can name it.
+ *
+ * Searchable because a shop runs to hundreds — nouvona.com publishes 107 — and
+ * because seeing a Product here is what tells a person it can be typed into the
+ * prompt at all. The same search the "@" picker runs, so what is found in one
+ * is found in the other.
+ */
+function RailProducts({ products }: { products: readonly Product[] }) {
+  const [query, setQuery] = useState("");
+  const found = matchProducts(products, query, 40);
+
+  return (
+    <RailBlock label={`Products · ${products.length}`}>
+      <input
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Search products…"
+        className="mb-2 w-full rounded-[6px] border border-white/[0.1] bg-white/[0.04] px-2 py-1.5 text-[11.5px] text-[#f4f2ef] outline-none transition placeholder:text-[#6f6f78] focus:border-white/25"
+      />
+      <ul className="space-y-1">
+        {found.map((product) => (
+          <li
+            key={product.name}
+            title={`Type @ in the prompt to name this — ${product.name}`}
+            className="flex items-center gap-2 rounded-[6px] px-1 py-1"
+          >
+            <span className="grid size-7 shrink-0 place-items-center overflow-hidden rounded-[4px] bg-white/[0.06]">
+              {product.imageUrl ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={product.imageUrl}
+                  alt=""
+                  loading="lazy"
+                  className="size-full object-cover"
+                />
+              ) : (
+                <span className="text-[8px] text-[#6f6f78]">—</span>
+              )}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[11.5px] text-[#c9c7c2]">
+                {product.name}
+              </span>
+              {product.price !== null && (
+                <span className="block text-[10px] text-[#8b8b93]">
+                  {product.currency} {product.price}
+                </span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {found.length === 0 && (
+        <p className="text-[11px] text-[#6f6f78]">Nothing matches “{query}”.</p>
+      )}
+      {query === "" && products.length > found.length && (
+        <p className="mt-1.5 text-[10.5px] text-[#6f6f78]">
+          +{products.length - found.length} more — search to narrow
+        </p>
+      )}
+    </RailBlock>
+  );
+}
+
 function BrandRail({
   brief: b,
   submittedDomain,
+  products,
   onClose,
   footer,
 }: {
   brief: AdBrief;
   submittedDomain: string;
+  products: readonly Product[];
   onClose: () => void;
   footer?: React.ReactNode;
 }) {
@@ -1997,6 +2087,8 @@ function BrandRail({
             </p>
           </RailBlock>
         )}
+
+        {products.length > 0 && <RailProducts products={products} />}
       </div>
 
       <div className="border-t border-white/[0.14] px-4 py-3.5">{footer}</div>
@@ -2301,6 +2393,8 @@ function Composer({
   setModel,
   aspectRatio,
   setAspectRatio,
+  products,
+  onMention,
 }: {
   onGenerate: () => void;
   busy: boolean;
@@ -2313,10 +2407,121 @@ function Composer({
   setModel: (next: ImageModelId) => void;
   aspectRatio: string;
   setAspectRatio: (next: string) => void;
+  /** The catalogue an "@" searches. */
+  products: readonly Product[];
+  /** Records what was named, so its photograph can travel with the request. */
+  onMention: (product: Product) => void;
 }) {
+  const box = useRef<HTMLTextAreaElement>(null);
+  const [mention, setMention] = useState<ActiveMention | null>(null);
+  const [highlighted, setHighlighted] = useState(0);
+
+  const matches = mention ? matchProducts(products, mention.query) : [];
+  const open = mention !== null && matches.length > 0;
+
+  /** Recomputed from the caret on every change, so it closes as soon as it should. */
+  const syncMention = (element: HTMLTextAreaElement) => {
+    setMention(activeMention(element.value, element.selectionStart ?? 0));
+    setHighlighted(0);
+  };
+
+  const choose = (product: Product) => {
+    if (!mention) return;
+    const next = insertMention(prompt, mention, product);
+    setPrompt(next.value);
+    onMention(product);
+    setMention(null);
+    // The caret belongs after the name, not at the end of whatever follows it.
+    requestAnimationFrame(() => {
+      box.current?.focus();
+      box.current?.setSelectionRange(next.caret, next.caret);
+    });
+  };
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (open) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        setHighlighted((was) => {
+          const step = event.key === "ArrowDown" ? 1 : -1;
+          return (was + step + matches.length) % matches.length;
+        });
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        choose(matches[highlighted]);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMention(null);
+        return;
+      }
+    }
+
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      if (!busy && prompt.trim()) onGenerate();
+    }
+  };
+
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-4 pb-4">
-      <div className="pointer-events-auto mx-auto w-full max-w-3xl">
+      <div className="pointer-events-auto relative mx-auto w-full max-w-3xl">
+        {/* Above the box: the list has to sit clear of the sheet edge, and the
+            prompt is already at the bottom of the screen. */}
+        {open && (
+          <div className="absolute inset-x-0 bottom-full mb-2 overflow-hidden rounded-[14px] border border-white/[0.14] bg-[#151517] shadow-[0_18px_50px_-24px_rgba(0,0,0,0.9)]">
+            <p className="border-b border-white/[0.1] px-3 py-1.5 text-[10px] uppercase tracking-[0.13em] text-[#6f6f78]">
+              {mention?.query ? `Products matching “${mention.query}”` : "Your products"}
+            </p>
+            <ul className="max-h-64 overflow-y-auto py-1">
+              {matches.map((product, index) => (
+                <li key={product.name}>
+                  <button
+                    type="button"
+                    // Mouse down, not click: the textarea must not lose the
+                    // caret before the name is inserted at it.
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      choose(product);
+                    }}
+                    onMouseEnter={() => setHighlighted(index)}
+                    className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition ${
+                      index === highlighted ? "bg-white/[0.08]" : ""
+                    }`}
+                  >
+                    <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-[5px] bg-white/[0.06]">
+                      {product.imageUrl ? (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img
+                          src={product.imageUrl}
+                          alt=""
+                          loading="lazy"
+                          className="size-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-[8px] text-[#6f6f78]">—</span>
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12.5px] text-[#f4f2ef]">
+                        {product.name}
+                      </span>
+                      {product.price !== null && (
+                        <span className="block text-[10.5px] text-[#8b8b93]">
+                          {product.currency} {product.price}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         <div className="studio-panel rounded-[16px] border border-white/[0.14] shadow-[0_18px_50px_-24px_rgba(0,0,0,0.9)]">
           <div className="flex items-start gap-2 px-3 pt-3">
             <button
@@ -2327,16 +2532,18 @@ function Composer({
               <ImageIcon />
             </button>
             <textarea
+              ref={box}
               rows={1}
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  if (!busy && prompt.trim()) onGenerate();
-                }
+              onChange={(e) => {
+                setPrompt(e.target.value);
+                syncMention(e.currentTarget);
               }}
-              placeholder="Describe the image you want to create…"
+              onKeyUp={(e) => syncMention(e.currentTarget)}
+              onClick={(e) => syncMention(e.currentTarget)}
+              onBlur={() => setMention(null)}
+              onKeyDown={onKeyDown}
+              placeholder="Describe the image you want to create…  type @ to name a product"
               className="max-h-28 min-h-[28px] flex-1 resize-none bg-transparent py-1 text-[13.5px] text-[#f4f2ef] outline-none placeholder:text-[#6f6f78]"
             />
           </div>

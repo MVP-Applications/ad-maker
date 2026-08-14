@@ -126,6 +126,8 @@ type ComposeController = {
 type ActiveController = {
   submittedDomain: string;
   brief: AdBrief;
+  /** The catalogue stays reachable while a run draws, so the rail keeps it. */
+  products: readonly Product[];
   elapsed: number;
   doneCount: number;
   /** Correct one or more Brief fields; the run carries the corrected copy. */
@@ -188,6 +190,7 @@ type InternalState =
       epoch: number;
       submittedDomain: string;
       brief: AdBrief;
+      products: readonly Product[];
       slots: readonly AdSlot[];
       settled: boolean;
     };
@@ -642,6 +645,7 @@ export function useAdMaker(): AdMakerController {
         epoch,
         submittedDomain,
         brief: plan.brief,
+        products: adRunBrief.products,
         slots,
         settled: false,
       });
@@ -907,6 +911,7 @@ export function useAdMaker(): AdMakerController {
   const active = {
     submittedDomain: state.submittedDomain,
     brief: state.brief,
+    products: state.products,
     slots: state.slots,
     elapsed,
     doneCount,
